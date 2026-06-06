@@ -1,112 +1,49 @@
-"""
-Image-to-3D via TripoSR sau InstantMesh.
-Modele descarcate in: C:/Users/Fane sefu meu/models_3d/
-"""
+"""Image-to-3D via TripoSR (subprocess with isolated venv)."""
 
-import subprocess, sys
+import subprocess
 from pathlib import Path
 
-MODELS_DIR = Path(r"C:\Users\Fane sefu meu\models_3d")
+VENV_PYTHON  = Path(r"C:\Users\Fane sefu meu\models_3d\tsr_venv\Scripts\python.exe")
+RUNNER_SCRIPT = Path(r"C:\Users\Fane sefu meu\models_3d\triposr_runner.py")
 
 
 def generate_3d(input_path: Path, model: str, out_dir: Path, update=None) -> Path:
-    if model.lower() in ("instantmesh", "instant-mesh"):
-        return _run_instantmesh(input_path, out_dir, update)
-    else:
-        return _run_triposr(input_path, out_dir, update)
-
-
-def _run_triposr(input_path: Path, out_dir: Path, update=None) -> Path:
-    if update: update(0.1)
-    try:
-        import rembg
-        import numpy as np
-        from PIL import Image
-    except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install",
-                        "rembg", "onnxruntime", "-q"], check=True)
-        import rembg
-        import numpy as np
-        from PIL import Image
-
-    try:
-        from tsr.system import TSR
-        from tsr.utils import remove_background, resize_foreground
-    except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install",
-                        "tsr", "-q"], check=True)
-        from tsr.system import TSR
-        from tsr.utils import remove_background, resize_foreground
-
-    import torch
-
-    if update: update(0.2)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model_path = MODELS_DIR / "TripoSR"
-
-    system = TSR.from_pretrained(
-        str(model_path) if model_path.exists() else "stabilityai/TripoSR",
-        config_name="config.yaml",
-        weight_name="model.ckpt",
-    )
-    system = system.to(device)
-
-    if update: update(0.3)
-
-    # Preproceseaza imaginea
-    image = Image.open(input_path).convert("RGB")
-    image = remove_background(image, rembg.new_session())
-    image = resize_foreground(image, 0.85)
-
-    if update: update(0.5)
-
-    with torch.no_grad():
-        scene_codes = system([image], device=device)
-
-    if update: update(0.7)
-
-    meshes = system.extract_mesh(scene_codes, resolution=256)
-    out_glb = out_dir / "model.glb"
-    meshes[0].export(str(out_glb))
-
-    if update: update(1.0)
-    return out_glb
-
-
-def _run_instantmesh(input_path: Path, out_dir: Path, update=None) -> Path:
-    if update: update(0.1)
-
-    instantmesh_dir = MODELS_DIR / "InstantMesh"
-    if not instantmesh_dir.exists():
+    if not VENV_PYTHON.exists():
         raise FileNotFoundError(
-            "InstantMesh nu e instalat. Ruleaza: python download_3d_models.py"
+            f"TripoSR venv not found at {VENV_PYTHON}. "
+            "Run the setup script to install it."
         )
 
-    script = instantmesh_dir / "run.py"
-    if update: update(0.2)
+    if update: update(0.05)
 
-    result = subprocess.run(
-        [sys.executable, str(script),
-         "--input", str(input_path),
-         "--output", str(out_dir),
-         "--export-texmap"],
-        capture_output=True, text=True, timeout=300,
+    proc = subprocess.Popen(
+        [str(VENV_PYTHON), str(RUNNER_SCRIPT), str(input_path), str(out_dir)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
 
-    if result.returncode != 0:
-        raise RuntimeError(f"InstantMesh error: {result.stderr[-500:]}")
+    if update: update(0.15)
 
-    if update: update(0.9)
+    stdout, stderr = proc.communicate(timeout=300)
 
-    # Cauta .glb in output
-    glbs = list(out_dir.glob("**/*.glb"))
-    if glbs:
-        if update: update(1.0)
-        return glbs[0]
+    if proc.returncode != 0:
+        raise RuntimeError(f"TripoSR failed:\n{stderr[-800:]}")
 
-    objs = list(out_dir.glob("**/*.obj"))
-    if objs:
-        if update: update(1.0)
-        return objs[0]
+    # Runner prints "RESULT:<path>" on success
+    result_path = None
+    for line in stdout.splitlines():
+        if line.startswith("RESULT:"):
+            result_path = Path(line[7:].strip())
+            break
 
-    raise FileNotFoundError("InstantMesh nu a generat niciun fisier 3D")
+    if not result_path or not result_path.exists():
+        # fallback: search for glb in out_dir
+        glbs = list(out_dir.glob("*.glb"))
+        if glbs:
+            result_path = glbs[0]
+        else:
+            raise FileNotFoundError(f"TripoSR produced no .glb file.\nstdout: {stdout}\nstderr: {stderr[-400:]}")
+
+    if update: update(1.0)
+    return result_path
