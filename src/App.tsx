@@ -280,24 +280,46 @@ export default function App() {
               />
             </>
           ) : (
-            <div
-              className={`upload-zone ${dragOver ? "dragover" : ""} ${uploadedFile ? "has-file" : ""}`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-            >
-              {uploadPreview ? (
-                <img src={uploadPreview} alt="Preview"
-                     style={{ maxHeight: 80, maxWidth: "100%", borderRadius: 4, objectFit: "contain" }} />
-              ) : <IconUpload />}
-              <span className="upload-label">
-                {uploadedFile ? "Click sau drop pentru a inlocui" : "Drop imagine sau click pentru upload"}
-              </span>
-              {uploadedFile && <span className="upload-filename">{uploadedFile.name}</span>}
-              <input ref={fileInputRef} type="file" accept="image/*" className="upload-input"
-                     onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-            </div>
+            <>
+              <div
+                className={`upload-zone ${dragOver ? "dragover" : ""} ${uploadedFile ? "has-file" : ""}`}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+              >
+                {uploadPreview ? (
+                  <img src={uploadPreview} alt="Preview"
+                       style={{ maxHeight: 80, maxWidth: "100%", borderRadius: 4, objectFit: "contain" }} />
+                ) : <IconUpload />}
+                <span className="upload-label">
+                  {uploadedFile ? "Click sau drop pentru a inlocui" : "Drop imagine sau click pentru upload"}
+                </span>
+                {uploadedFile && <span className="upload-filename">{uploadedFile.name}</span>}
+                <input ref={fileInputRef} type="file" accept="image/*" className="upload-input"
+                       onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              </div>
+              {category === "image-to-video" && (
+                <>
+                  <textarea
+                    className="textarea"
+                    placeholder="Descrie miscarea / actiunea din video (optional, in engleza)..."
+                    value={prompt}
+                    onChange={e => setPrompt(e.target.value)}
+                    rows={3}
+                    style={{ marginTop: 8 }}
+                  />
+                  <textarea
+                    className="textarea"
+                    placeholder="Negative prompt (optional)..."
+                    value={negPrompt}
+                    onChange={e => setNegPrompt(e.target.value)}
+                    rows={2}
+                    style={{ marginTop: 8 }}
+                  />
+                </>
+              )}
+            </>
           )}
 
           <div className="divider" />
