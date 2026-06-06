@@ -8,12 +8,11 @@ export interface GenerationState {
   progress: number;
   resultUrl: string | null;
   error: string | null;
-  queuePosition: number | null;
 }
 
 export function useGeneration() {
   const [state, setState] = useState<GenerationState>({
-    status: "idle", progress: 0, resultUrl: null, error: null, queuePosition: null,
+    status: "idle", progress: 0, resultUrl: null, error: null,
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -22,65 +21,70 @@ export function useGeneration() {
   }
 
   async function submit(params: {
-    mode: string; prompt: string; negPrompt: string;
-    model: string; steps: number; cfg: number;
-    resolution: string; seed: number; file?: File | null;
+    mode: string;
+    prompt?: string;
+    negPrompt?: string;
+    model?: string;
+    steps?: number;
+    cfg?: number;
+    resolution?: string;
+    seed?: number;
+    file?: File | null;
+    audioFile?: File | null;
+    extraBody?: Record<string, unknown>;
   }) {
     stopPolling();
-    setState({ status: "uploading", progress: 0, resultUrl: null, error: null, queuePosition: null });
+    setState({ status: "uploading", progress: 0, resultUrl: null, error: null });
 
     try {
       let file_id: string | undefined;
-      if (params.file) {
-        file_id = await apiUpload(params.file);
-      }
+      if (params.file) file_id = await apiUpload(params.file);
+
+      let audio_file_id: string | undefined;
+      if (params.audioFile) audio_file_id = await apiUpload(params.audioFile);
 
       setState(s => ({ ...s, status: "queued", progress: 0.02 }));
 
       const jobId = await apiGenerate({
         mode: params.mode,
-        prompt: params.prompt,
-        neg_prompt: params.negPrompt,
-        model: params.model,
-        steps: params.steps,
-        cfg: params.cfg,
-        resolution: params.resolution,
-        seed: params.seed,
+        prompt:      params.prompt     ?? "",
+        neg_prompt:  params.negPrompt  ?? "",
+        model:       params.model      ?? "sdxl",
+        steps:       params.steps      ?? 30,
+        cfg:         params.cfg        ?? 7,
+        resolution:  params.resolution ?? "1024×1024",
+        seed:        params.seed       ?? -1,
         file_id,
+        audio_file_id,
+        ...params.extraBody,
       });
 
-      // Polling la fiecare 2 secunde
       pollRef.current = setInterval(async () => {
         try {
           const data = await apiStatus(jobId);
           setState(s => ({
             ...s,
-            status: data.status as JobStatus,
+            status:   data.status as JobStatus,
             progress: data.progress,
-            error: data.error ?? null,
+            error:    data.error ?? null,
           }));
-
           if (data.status === "done") {
             stopPolling();
             setState(s => ({ ...s, resultUrl: resultUrl(jobId), progress: 1 }));
           }
-          if (data.status === "error") {
-            stopPolling();
-          }
-        } catch {
-          // ignora erori temporare de retea
-        }
+          if (data.status === "error") stopPolling();
+        } catch { /* ignore transient network errors */ }
       }, 2000);
 
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
-      setState({ status: "error", progress: 0, resultUrl: null, error: msg, queuePosition: null });
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setState({ status: "error", progress: 0, resultUrl: null, error: msg });
     }
   }
 
   function reset() {
     stopPolling();
-    setState({ status: "idle", progress: 0, resultUrl: null, error: null, queuePosition: null });
+    setState({ status: "idle", progress: 0, resultUrl: null, error: null });
   }
 
   return { ...state, submit, reset };

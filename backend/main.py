@@ -16,6 +16,7 @@ from middleware.auth import validate_key, check_rate_limit
 from generators.text_to_image import generate_image
 from generators.image_to_3d import generate_3d
 from generators.image_to_video import generate_video
+from generators.lipsync import generate_lipsync
 
 # ── Config ──────────────────────────────────────────────
 TEMP_DIR  = Path(__file__).parent / "temp"
@@ -48,7 +49,7 @@ async def startup():
 
 # ── Models ───────────────────────────────────────────────
 class GenerateRequest(BaseModel):
-    mode: str              # "text-to-image" | "image-to-3d" | "image-to-video"
+    mode: str              # "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync"
     prompt: str = ""
     neg_prompt: str = ""
     model: str = "sdxl"
@@ -57,6 +58,12 @@ class GenerateRequest(BaseModel):
     resolution: str = "1024×1024"
     seed: int = -1
     file_id: Optional[str] = None
+    # Lip-sync specific
+    audio_file_id: Optional[str] = None
+    tts_text: str = ""
+    tts_voice: str = "en-US-JennyNeural"
+    lips_expression: float = 1.8
+    ls_steps: int = 20
 
 # ── Routes ───────────────────────────────────────────────
 @app.get("/api/health")
@@ -74,13 +81,13 @@ async def upload(
     key: Optional[str] = Query(None),
 ):
     validate_key(x_api_key or key)
-    if file.size and file.size > 20 * 1024 * 1024:
-        raise HTTPException(413, "Fisier prea mare (max 20MB)")
+    if file.size and file.size > 50 * 1024 * 1024:
+        raise HTTPException(413, "File too large (max 50MB)")
 
     file_id = uuid.uuid4().hex
     dest_dir = TEMP_DIR / "uploads" / file_id
     dest_dir.mkdir(parents=True)
-    ext = Path(file.filename).suffix or ".png"
+    ext = Path(file.filename).suffix or ".bin"
     dest = dest_dir / f"input{ext}"
     dest.write_bytes(await file.read())
     return {"file_id": file_id, "filename": dest.name}
@@ -186,8 +193,18 @@ async def worker():
                 result_path = await asyncio.to_thread(
                     generate_video, input_path, req.prompt, req.neg_prompt, out_dir, update
                 )
+            elif req.mode == "lip-sync":
+                avatar_path = _find_upload(req.file_id)
+                audio_path  = _find_upload(req.audio_file_id) if req.audio_file_id else None
+                result_path = await asyncio.to_thread(
+                    generate_lipsync,
+                    avatar_path, audio_path,
+                    req.tts_text, req.tts_voice,
+                    req.lips_expression, req.ls_steps,
+                    out_dir, update,
+                )
             else:
-                raise ValueError(f"Mod necunoscut: {req.mode}")
+                raise ValueError(f"Unknown mode: {req.mode}")
 
             job_store[job_id].update({
                 "status": "done",
