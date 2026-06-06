@@ -70,15 +70,36 @@ input[type="number"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 48px 20px 64px;
+  padding: 40px 20px 64px;
 }
 
-.panel {
+/* Two-column workspace */
+.workspace {
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
   width: 100%;
-  max-width: 720px;
+  max-width: 1400px;
+  align-items: flex-start;
+}
+
+.panel-col {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
+}
+
+@media (max-width: 1080px) {
+  .workspace {
+    flex-direction: column;
+  }
+  .panel-col {
+    width: 100%;
+    max-width: 680px;
+    align-self: center;
+  }
 }
 
 /* Header */
@@ -87,6 +108,9 @@ input[type="number"] {
   flex-direction: column;
   align-items: center;
   gap: 12px;
+  width: 100%;
+  max-width: 1400px;
+  margin-bottom: 8px;
 }
 
 .logo {
@@ -586,6 +610,55 @@ input[type="number"] {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+/* Panel title */
+.panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+/* Toggle group (audio source) */
+.toggle-group {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: color 0.15s, background 0.15s;
+  text-align: center;
+}
+
+.toggle-btn:hover:not(.active) {
+  color: var(--text);
+}
+
+.toggle-btn.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Error box */
+.error-box {
+  color: #f87171;
+  font-size: 13px;
+  padding: 8px 12px;
+  background: rgba(248, 113, 113, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(248, 113, 113, 0.2);
 }
 
 @media (max-width: 520px) {
