@@ -7,8 +7,8 @@ API_KEY = os.environ.get("FREEGMA_API_KEY", "freegma-dev-key-2026")
 RATE_LIMIT_SECONDS = 90
 _last_request: dict[str, float] = {}
 
-def validate_key(key: str):
-    if key != API_KEY:
+def validate_key(key: str | None):
+    if not key or key != API_KEY:
         raise HTTPException(401, "API key invalid")
 
 def check_rate_limit(ip: str):

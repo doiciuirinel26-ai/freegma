@@ -4,7 +4,7 @@ Expune ComfyUI + TripoSR + InstantMesh printr-un API REST securizat.
 Ruleaza local pe portul 8000, expus public prin Cloudflare Tunnel.
 """
 
-from fastapi import FastAPI, UploadFile, File, Header, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Header, Request, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import uvicorn, uuid, asyncio, time, shutil, os
@@ -32,13 +32,9 @@ app = FastAPI(title="FREEGMA GPU Backend", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://freegma.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:4173",
-    ],
+    allow_origins=["*"],
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["X-API-Key", "Content-Type"],
+    allow_headers=["*"],
 )
 
 # ── Lifespan: porneste worker-ul la startup ───────────────
@@ -74,9 +70,10 @@ async def health():
 @app.post("/api/upload")
 async def upload(
     file: UploadFile = File(...),
-    x_api_key: str = Header(...),
+    x_api_key: Optional[str] = Header(None),
+    key: Optional[str] = Query(None),
 ):
-    validate_key(x_api_key)
+    validate_key(x_api_key or key)
     if file.size and file.size > 20 * 1024 * 1024:
         raise HTTPException(413, "Fisier prea mare (max 20MB)")
 
@@ -92,9 +89,10 @@ async def upload(
 async def generate(
     body: GenerateRequest,
     request: Request,
-    x_api_key: str = Header(...),
+    x_api_key: Optional[str] = Header(None),
+    key: Optional[str] = Query(None),
 ):
-    validate_key(x_api_key)
+    validate_key(x_api_key or key)
     client_ip = request.headers.get("CF-Connecting-IP", request.client.host)
     check_rate_limit(client_ip)
 
@@ -114,8 +112,8 @@ async def generate(
     return {"job_id": job_id, "queue_position": queue_pos}
 
 @app.get("/api/status/{job_id}")
-async def status(job_id: str, x_api_key: str = Header(...)):
-    validate_key(x_api_key)
+async def status(job_id: str, x_api_key: Optional[str] = Header(None), key: Optional[str] = Query(None)):
+    validate_key(x_api_key or key)
     job = job_store.get(job_id)
     if not job:
         raise HTTPException(404, "Job negasit")
@@ -126,8 +124,8 @@ async def status(job_id: str, x_api_key: str = Header(...)):
     }
 
 @app.get("/api/result/{job_id}")
-async def result(job_id: str, x_api_key: str = Header(...)):
-    validate_key(x_api_key)
+async def result(job_id: str, x_api_key: Optional[str] = Header(None), key: Optional[str] = Query(None)):
+    validate_key(x_api_key or key)
     job = job_store.get(job_id)
     if not job:
         raise HTTPException(404, "Job negasit")
