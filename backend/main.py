@@ -191,7 +191,7 @@ async def worker():
             elif req.mode == "image-to-video":
                 input_path = _find_upload(req.file_id)
                 result_path = await asyncio.to_thread(
-                    generate_video, input_path, req.prompt, req.neg_prompt, out_dir, update
+                    generate_video, input_path, req.prompt, req.neg_prompt, req.model, out_dir, update
                 )
             elif req.mode == "lip-sync":
                 avatar_path = _find_upload(req.file_id)

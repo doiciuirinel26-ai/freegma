@@ -16,7 +16,8 @@ const MODELS: Record<Category, { id: string; label: string }[]> = {
     { id: "instantmesh", label: "InstantMesh (quality, ~3min)" },
   ],
   "image-to-video": [
-    { id: "wan2video", label: "WAN 2.2 I2V" },
+    { id: "wan2video",  label: "WAN 2.2 I2V (fast, ~30s)" },
+    { id: "hunyuan15", label: "HunyuanVideo 1.5 (quality, ~8min)" },
   ],
 };
 

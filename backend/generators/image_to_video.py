@@ -1,7 +1,14 @@
-"""Image-to-Video via ComfyUI WAN 2.2 I2V (WanImageToVideo + LightX2V 4-step LoRA)."""
+"""Image-to-Video via ComfyUI WAN 2.2 or HunyuanVideo 1.5 (subprocess)."""
 
-import uuid, time, random, requests
+import uuid, time, random, requests, subprocess
 from pathlib import Path
+
+MODELS_DIR = Path(r"C:\Users\Fane sefu meu\models_3d")
+
+HUNYUAN_RUNNER = {
+    "python": MODELS_DIR / "hunyuan15_venv" / "Scripts" / "python.exe",
+    "script": MODELS_DIR / "hunyuan15_runner.py",
+}
 
 COMFYUI_URL = "http://127.0.0.1:8188"
 
@@ -117,10 +124,47 @@ def _build_workflow(image_filename: str, prompt: str, neg: str, seed: int) -> di
     }
 
 
+def _generate_hunyuan(input_path: Path, prompt: str, out_dir: Path, update=None) -> Path:
+    py     = HUNYUAN_RUNNER["python"]
+    script = HUNYUAN_RUNNER["script"]
+
+    if not py.exists():
+        raise FileNotFoundError(
+            f"HunyuanVideo 1.5 venv not found at {py}. Run setup to install it."
+        )
+
+    if update: update(0.05)
+
+    proc = subprocess.Popen(
+        [str(py), str(script), str(input_path), str(out_dir), prompt, "61"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+
+    if update: update(0.10)
+    stdout, stderr = proc.communicate(timeout=1200)  # 20 min
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"HunyuanVideo 1.5 failed:\n{stderr[-800:]}")
+
+    for line in stdout.splitlines():
+        if line.startswith("RESULT:"):
+            result_path = Path(line[7:].strip())
+            if result_path.exists():
+                if update: update(1.0)
+                return result_path
+
+    raise FileNotFoundError(
+        f"HunyuanVideo 1.5 produced no video.\nstdout: {stdout}\nstderr: {stderr[-400:]}"
+    )
+
+
 def generate_video(
-    input_path: Path, prompt: str, neg: str,
-    out_dir: Path, update=None,
+    input_path: Path, prompt: str, neg: str, model: str = "wan2video",
+    out_dir: Path = None, update=None,
 ) -> Path:
+    if model == "hunyuan15":
+        return _generate_hunyuan(input_path, prompt, out_dir, update)
+
     if update: update(0.05)
 
     image_filename = _upload_to_comfyui(input_path)
