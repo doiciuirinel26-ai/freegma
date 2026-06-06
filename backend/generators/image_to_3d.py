@@ -18,6 +18,10 @@ RUNNERS = {
         "python": MODELS_DIR / "sf3d_venv" / "Scripts" / "python.exe",
         "script": MODELS_DIR / "sf3d_runner.py",
     },
+    "hunyuan3d": {
+        "python": MODELS_DIR / "hunyuan3d_venv" / "Scripts" / "python.exe",
+        "script": MODELS_DIR / "hunyuan3d_runner.py",
+    },
 }
 
 
@@ -42,7 +46,7 @@ def generate_3d(input_path: Path, model: str, out_dir: Path, update=None) -> Pat
 
     if update: update(0.15)
 
-    timeout = 600 if model == "instantmesh" else 300
+    timeout = 600 if model in ("instantmesh", "hunyuan3d") else 300
     stdout, stderr = proc.communicate(timeout=timeout)
 
     if proc.returncode != 0:

@@ -14,6 +14,7 @@ const MODELS: Record<Category, { id: string; label: string }[]> = {
     { id: "triposr",     label: "TripoSR (fast, ~30s)" },
     { id: "sf3d",        label: "SF3D (4K textures, ~45s)" },
     { id: "instantmesh", label: "InstantMesh (quality, ~3min)" },
+    { id: "hunyuan3d",   label: "Hunyuan3D-2.1 (best quality, ~4min)" },
   ],
   "image-to-video": [
     { id: "wan2video",  label: "WAN 2.2 I2V (fast, ~30s)" },
