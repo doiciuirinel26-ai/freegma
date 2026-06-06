@@ -114,8 +114,8 @@ input[type="number"] {
 }
 
 .logo-3d {
-  width: 480px;
-  height: 140px;
+  width: 700px;
+  height: 200px;
   background: transparent;
   --progress-bar-color: transparent;
   cursor: grab;
