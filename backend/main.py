@@ -104,7 +104,7 @@ async def generate(
     check_rate_limit(client_ip)
 
     if job_queue.qsize() >= MAX_QUEUE:
-        raise HTTPException(429, "GPU ocupat, incearca din nou in cateva minute")
+        raise HTTPException(429, "GPU busy, please try again in a few minutes")
 
     job_id = uuid.uuid4().hex
     job_store[job_id] = {
@@ -123,7 +123,7 @@ async def status(job_id: str, x_api_key: Optional[str] = Header(None), key: Opti
     validate_key(x_api_key or key)
     job = job_store.get(job_id)
     if not job:
-        raise HTTPException(404, "Job negasit")
+        raise HTTPException(404, "Job not found")
     return {
         "status": job["status"],
         "progress": job["progress"],
@@ -135,12 +135,12 @@ async def result(job_id: str, x_api_key: Optional[str] = Header(None), key: Opti
     validate_key(x_api_key or key)
     job = job_store.get(job_id)
     if not job:
-        raise HTTPException(404, "Job negasit")
+        raise HTTPException(404, "Job not found")
     if job["status"] != "done":
-        raise HTTPException(400, f"Job nu e gata (status: {job['status']})")
+        raise HTTPException(400, f"Job not ready yet (status: {job['status']})")
     path = Path(job["result_path"])
     if not path.exists():
-        raise HTTPException(410, "Rezultat expirat")
+        raise HTTPException(410, "Result expired")
     return FileResponse(
         str(path),
         media_type=_media_type(path),
@@ -237,11 +237,11 @@ def _parse_resolution(res: str) -> tuple[int, int]:
 
 def _find_upload(file_id: Optional[str]) -> Path:
     if not file_id:
-        raise ValueError("file_id lipsa pentru acest mod")
+        raise ValueError("file_id missing for this mode")
     upload_dir = TEMP_DIR / "uploads" / file_id
     files = list(upload_dir.glob("input.*"))
     if not files:
-        raise FileNotFoundError(f"Upload {file_id} nu a fost gasit")
+        raise FileNotFoundError(f"Upload {file_id} not found")
     return files[0]
 
 # ── Cleanup uploads vechi la startup ─────────────────────

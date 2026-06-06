@@ -1,4 +1,4 @@
-"""Image-to-Video via ComfyUI WAN 2.2 VACE workflow."""
+"""Image-to-Video via ComfyUI WAN 2.2 I2V (WanImageToVideo + LightX2V 4-step LoRA)."""
 
 import uuid, time, random, requests
 from pathlib import Path
@@ -6,8 +6,9 @@ from pathlib import Path
 COMFYUI_URL = "http://127.0.0.1:8188"
 
 DEFAULT_NEG = (
-    "static, no motion, blur, low quality, worst quality, "
-    "overexposed, text, watermark, ugly"
+    "static frozen motion, blurry details, overexposed highlights, "
+    "watermark, text overlay, deformed, distorted, low quality, "
+    "jpeg artifacts, grainy, noisy, flickering"
 )
 
 
@@ -23,91 +24,92 @@ def _upload_to_comfyui(image_path: Path) -> str:
     return resp.json()["name"]
 
 
-def _build_wan_workflow(image_filename: str, prompt: str, neg: str, seed: int) -> dict:
+def _build_workflow(image_filename: str, prompt: str, neg: str, seed: int) -> dict:
     if seed < 0:
         seed = random.randint(0, 2**32 - 1)
     if not neg.strip():
         neg = DEFAULT_NEG
 
+    pos_text = (prompt.strip() or "cinematic motion, smooth video") + ", high quality, realistic"
+
     return {
-        # Loaders
+        # 1. Load diffusion model
         "1": {"class_type": "UNETLoader", "inputs": {
             "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
             "weight_dtype": "default",
         }},
-        "2": {"class_type": "CLIPLoader", "inputs": {
-            "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-            "type": "wan",
-            "device": "default",
+        # 2. Apply LightX2V 4-step LoRA (model only, strength 1.0)
+        "2": {"class_type": "LoraLoaderModelOnly", "inputs": {
+            "model":        ["1", 0],
+            "lora_name":    "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise (1).safetensors",
+            "strength_model": 1.0,
         }},
-        "3": {"class_type": "VAELoader", "inputs": {
+        # 3. Shift sampler for WAN
+        "3": {"class_type": "ModelSamplingSD3", "inputs": {
+            "model": ["2", 0],
+            "shift": 5.0,
+        }},
+        # 4. Load CLIP text encoder (direct — not through LoRA)
+        "4": {"class_type": "CLIPLoader", "inputs": {
+            "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+            "type":      "wan",
+            "device":    "default",
+        }},
+        # 5. Load VAE
+        "5": {"class_type": "VAELoader", "inputs": {
             "vae_name": "wan_2.1_vae.safetensors",
         }},
-        # LoRA (4-step acceleration)
-        "4": {"class_type": "LoraLoader", "inputs": {
-            "model": ["1", 0],
-            "clip":  ["2", 0],
-            "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise (3).safetensors",
-            "strength_model": 0.3,
-            "strength_clip":  1.0,
-        }},
-        # Prompts
-        "5": {"class_type": "CLIPTextEncode", "inputs": {
-            "clip": ["4", 1],
-            "text": (prompt.strip() or "cinematic motion, smooth video") + ", high quality, realistic",
-        }},
+        # 6. Positive prompt
         "6": {"class_type": "CLIPTextEncode", "inputs": {
-            "clip": ["4", 1],
+            "clip": ["4", 0],
+            "text": pos_text,
+        }},
+        # 7. Negative prompt
+        "7": {"class_type": "CLIPTextEncode", "inputs": {
+            "clip": ["4", 0],
             "text": neg,
         }},
-        # Input image
-        "7": {"class_type": "LoadImage", "inputs": {"image": image_filename}},
-        # WAN VACE conditioning
-        "8": {"class_type": "WanVaceToVideo", "inputs": {
-            "positive":        ["5", 0],
-            "negative":        ["6", 0],
-            "vae":             ["3", 0],
-            "reference_image": ["7", 0],
-            "width":   768,
-            "height":  768,
-            "length":  81,
-            "batch_size": 1,
-            "strength": 1.0,
+        # 8. Load reference image
+        "8": {"class_type": "LoadImage", "inputs": {
+            "image": image_filename,
         }},
-        # Shift sampler for video
-        "9": {"class_type": "ModelSamplingSD3", "inputs": {
-            "model": ["4", 0],
-            "shift": 8.0,
+        # 9. WAN Image-to-Video conditioning
+        "9": {"class_type": "WanImageToVideo", "inputs": {
+            "positive":    ["6", 0],
+            "negative":    ["7", 0],
+            "vae":         ["5", 0],
+            "start_image": ["8", 0],
+            "width":       640,
+            "height":      640,
+            "length":      81,
+            "batch_size":  1,
         }},
-        # KSampler (4 steps with CausVid LoRA)
+        # 10. KSampler — 4 steps with LightX2V LoRA
         "10": {"class_type": "KSampler", "inputs": {
-            "model":        ["9", 0],
-            "positive":     ["8", 0],
-            "negative":     ["8", 1],
-            "latent_image": ["8", 2],
+            "model":        ["3", 0],
+            "positive":     ["9", 0],
+            "negative":     ["9", 1],
+            "latent_image": ["9", 2],
             "seed":         seed,
             "steps":        4,
             "cfg":          1.0,
-            "sampler_name": "uni_pc",
+            "sampler_name": "euler",
             "scheduler":    "simple",
             "denoise":      1.0,
         }},
-        # Trim + decode
-        "11": {"class_type": "TrimVideoLatent", "inputs": {
-            "samples":     ["10", 0],
-            "trim_amount": ["8", 3],
+        # 11. Decode latent to images
+        "11": {"class_type": "VAEDecode", "inputs": {
+            "samples": ["10", 0],
+            "vae":     ["5", 0],
         }},
-        "12": {"class_type": "VAEDecode", "inputs": {
-            "samples": ["11", 0],
-            "vae":     ["3", 0],
+        # 12. Combine frames into video
+        "12": {"class_type": "CreateVideo", "inputs": {
+            "images": ["11", 0],
+            "fps":    16.0,
         }},
-        # Save as MP4
-        "13": {"class_type": "CreateVideo", "inputs": {
-            "images": ["12", 0],
-            "fps":    16,
-        }},
-        "14": {"class_type": "SaveVideo", "inputs": {
-            "video":           ["13", 0],
+        # 13. Save video to disk
+        "13": {"class_type": "SaveVideo", "inputs": {
+            "video":           ["12", 0],
             "filename_prefix": "freegma_vid",
             "format":          "auto",
             "codec":           "auto",
@@ -125,7 +127,7 @@ def generate_video(
     if update: update(0.10)
 
     client_id = str(uuid.uuid4())
-    workflow  = _build_wan_workflow(image_filename, prompt, neg, -1)
+    workflow  = _build_workflow(image_filename, prompt, neg, -1)
 
     resp = requests.post(
         f"{COMFYUI_URL}/prompt",
@@ -135,7 +137,7 @@ def generate_video(
     resp.raise_for_status()
     prompt_id = resp.json()["prompt_id"]
 
-    # Poll up to 20 min (600 x 2s)
+    # Poll up to 20 min
     for attempt in range(600):
         time.sleep(2)
         if update and attempt % 15 == 0:

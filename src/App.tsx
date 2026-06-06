@@ -11,8 +11,9 @@ const MODELS: Record<Category, { id: string; label: string }[]> = {
     { id: "sdxl", label: "FLUX 1.1 (soon)" },
   ],
   "image-to-3d": [
-    { id: "triposr",     label: "TripoSR (fast)" },
-    { id: "instantmesh", label: "InstantMesh (quality)" },
+    { id: "triposr",     label: "TripoSR (fast, ~30s)" },
+    { id: "sf3d",        label: "SF3D (4K textures, ~45s)" },
+    { id: "instantmesh", label: "InstantMesh (quality, ~3min)" },
   ],
   "image-to-video": [
     { id: "wan2video", label: "WAN 2.2 I2V" },
