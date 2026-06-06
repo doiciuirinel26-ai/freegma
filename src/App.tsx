@@ -553,7 +553,20 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <h1 className="logo">Freegma</h1>
+        {/* @ts-ignore */}
+        <model-viewer
+          className="logo-3d"
+          src="/freegma_logo.glb"
+          auto-rotate
+          auto-rotate-delay="0"
+          rotation-per-second="20deg"
+          camera-controls
+          touch-action="pan-y"
+          shadow-intensity="0"
+          exposure="1.2"
+          camera-orbit="0deg 80deg 105%"
+          interaction-prompt="none"
+        />
         <div className="header-meta">
           <span className="status-pill">
             <span className={`status-dot ${gpuOnline ? "online" : "offline"}`} />
