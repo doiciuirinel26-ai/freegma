@@ -111,6 +111,15 @@ function IconDownload() {
     </svg>
   );
 }
+function IconAR() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M2 8V4a1 1 0 0 1 1-1h4M22 8V4a1 1 0 0 0-1-1h-4M2 16v4a1 1 0 0 0 1 1h4M22 16v4a1 1 0 0 1-1 1h-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="M12 8l4 2.3v4.4L12 17l-4-2.3V10.3L12 8z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+      <path d="M8 10.3l4 2.3 4-2.3M12 17v-4.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 /* ── Progress bar ─────────────────────────────────────── */
 function ProgressBar({ value }: { value: number }) {
@@ -136,6 +145,7 @@ function AIStudioPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
   const [seed, setSeed]         = useState(randomSeed);
   const fileInputRef      = useRef<HTMLInputElement>(null);
   const uploadPreviewRef  = useRef<string | null>(null);
+  const modelViewerRef    = useRef<any>(null);
 
   const gen         = useGeneration();
   const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
@@ -307,7 +317,8 @@ function AIStudioPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
             ) : (
               <div style={{ width: "100%", height: 300, background: "#111", borderRadius: 6, overflow: "hidden" }}>
                 {/* @ts-ignore */}
-                <model-viewer src={gen.resultUrl} alt="3D Model" auto-rotate camera-controls
+                <model-viewer ref={modelViewerRef} src={gen.resultUrl} alt="3D Model" auto-rotate camera-controls
+                  ar ar-modes="scene-viewer webxr quick-look"
                   style={{ width: "100%", height: "100%" }} />
               </div>
             )
@@ -319,6 +330,21 @@ function AIStudioPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
                      textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
             <IconDownload />Download
           </a>
+          {category === "image-to-3d" && gen.resultUrl && (
+            <button
+              className="download-btn"
+              style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--accent)", color: "#000", border: "none", cursor: "pointer" }}
+              onClick={() => {
+                if (modelViewerRef.current?.activateAR) {
+                  modelViewerRef.current.activateAR();
+                } else {
+                  window.open(`https://arvr.google.com/scene-viewer/1.0?file=${encodeURIComponent(gen.resultUrl!)}&mode=ar_preferred`, "_blank");
+                }
+              }}
+            >
+              <IconAR />AR
+            </button>
+          )}
           {gen.status === "done" && (
             <button className="dice-btn" style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
               onClick={gen.reset}>
