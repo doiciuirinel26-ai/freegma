@@ -568,6 +568,9 @@ export default function App() {
         >
           <span slot="error" className="logo-fallback">FREEGMA</span>
         </model-viewer>
+        <div className="disclaimer-banner">
+          ⚠️ The estimated times next to the models are given by Claude, but don't believe him, it actually takes longer.
+        </div>
         <div className="header-meta">
           <span className="status-pill">
             <span className={`status-dot ${gpuOnline ? "online" : "offline"}`} />
