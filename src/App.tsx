@@ -3,7 +3,6 @@ import { useGeneration } from "./hooks/useGeneration";
 import { apiHealth } from "./api/client";
 
 type Page = "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync";
-type AudioMode = "tts" | "upload";
 
 const MODELS = {
   "text-to-image": [
@@ -24,18 +23,6 @@ const MODELS = {
 
 const RESOLUTIONS = ["512×512", "768×768", "1024×1024"];
 
-const VOICES = [
-  { id: "en-US-JennyNeural",  label: "English — Jenny (Female)" },
-  { id: "en-US-GuyNeural",    label: "English — Guy (Male)" },
-  { id: "en-US-AriaNeural",   label: "English — Aria (Female)" },
-  { id: "en-US-DavisNeural",  label: "English — Davis (Male)" },
-  { id: "ro-RO-AlinaNeural",  label: "Romanian — Alina (Female)" },
-  { id: "ro-RO-EmilNeural",   label: "Romanian — Emil (Male)" },
-  { id: "es-ES-ElviraNeural", label: "Spanish — Elvira (Female)" },
-  { id: "fr-FR-DeniseNeural", label: "French — Denise (Female)" },
-  { id: "de-DE-KatjaNeural",  label: "German — Katja (Female)" },
-  { id: "it-IT-ElsaNeural",   label: "Italian — Elsa (Female)" },
-];
 
 const STATUS_LABELS: Record<string, string> = {
   uploading: "Uploading...",
@@ -410,22 +397,84 @@ function ImageToVideoPage({ gpuOnline }: { gpuOnline: boolean | null }) {
   );
 }
 
+/* ── Video Pipeline shared sub-components ────────────────────────────────── */
+function PipelineSection({ label, desc, enabled, onToggle, children }: {
+  label: string; desc: string; enabled: boolean;
+  onToggle: (v: boolean) => void; children: React.ReactNode;
+}) {
+  return (
+    <div className="pipeline-section">
+      <label className="pipeline-toggle-row">
+        <input type="checkbox" className="pipeline-checkbox"
+          checked={enabled} onChange={e => onToggle(e.target.checked)} />
+        <span className="pipeline-section-title">{label}</span>
+      </label>
+      <p className="pipeline-section-desc">{desc}</p>
+      {enabled && <div className="pipeline-section-body">{children}</div>}
+    </div>
+  );
+}
+
+function MultiUploadZone({ files, onFiles, accept, label }: {
+  files: File[]; onFiles: (f: File[]) => void; accept: string; label: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const add = (fl: FileList | null) => { if (fl) onFiles([...files, ...Array.from(fl)]); };
+  return (
+    <div className={`upload-zone ${drag ? "dragover" : ""} ${files.length > 0 ? "has-file" : ""}`}
+      onClick={() => inputRef.current?.click()}
+      onDragOver={e => { e.preventDefault(); setDrag(true); }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={e => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files); }}>
+      {files.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <span className="upload-filename">
+            {files.length} fișier{files.length > 1 ? "e" : ""} selectat{files.length > 1 ? "e" : ""}
+          </span>
+          <button type="button" className="action-btn action-btn-secondary"
+            onClick={e => { e.stopPropagation(); onFiles([]); }}>Șterge tot</button>
+        </div>
+      ) : (
+        <><IconUpload /><span className="upload-label">{label}</span></>
+      )}
+      <input ref={inputRef} type="file" accept={accept} multiple className="upload-input"
+        onChange={e => add(e.target.files)} />
+    </div>
+  );
+}
+
+/* ── Lip Sync / Video Pipeline page ─────────────────────────────────────── */
 function LipSyncPage({ gpuOnline }: { gpuOnline: boolean | null }) {
-  const [avatarFile, setAvatarFile]   = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [lsAudioFile, setLsAudioFile] = useState<File | null>(null);
-  const [audioMode, setAudioMode]     = useState<AudioMode>("tts");
-  const [ttsText, setTtsText]         = useState("");
-  const [ttsVoice, setTtsVoice]       = useState("en-US-JennyNeural");
-  const [lipsExpr, setLipsExpr]       = useState(1.8);
-  const [lsSteps, setLsSteps]         = useState(20);
-  const avatarUrlRef   = useRef<string | null>(null);
-  const audioInputRef  = useRef<HTMLInputElement>(null);
-  const [audioDrag, setAudioDrag]     = useState(false);
+  // Section toggles
+  const [useBgImages,    setUseBgImages]    = useState(true);
+  const [useBgVideo,     setUseBgVideo]     = useState(false);
+  const [useAvatar,      setUseAvatar]      = useState(false);
+  const [useNarration,   setUseNarration]   = useState(true);
+
+  // Content
+  const [bgImages,       setBgImages]       = useState<File[]>([]);
+  const [bgVideos,       setBgVideos]       = useState<File[]>([]);
+  const [avatarFile,     setAvatarFile]     = useState<File | null>(null);
+  const [avatarPreview,  setAvatarPreview]  = useState<string | null>(null);
+  const [narration,      setNarration]      = useState("");
+  const avatarUrlRef = useRef<string | null>(null);
+
+  // Advanced options
+  const [ttsEngine, setTtsEngine]           = useState<"kokoro" | "edge">("kokoro");
+  const [lang,      setLang]                = useState<"en" | "ro">("en");
+  const [fixedDur,  setFixedDur]            = useState(false);
+  const [sceneDur,  setSceneDur]            = useState(5);
+  const [noZoom,    setNoZoom]              = useState(false);
+  const [noSubs,    setNoSubs]              = useState(false);
+
   const gen = useGeneration();
   const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
-  const canGenerate = gpuOnline === true && !isGenerating && avatarFile !== null &&
-    (audioMode === "upload" ? lsAudioFile !== null : ttsText.trim().length > 0);
+
+  const hasBg = (useBgImages && bgImages.length > 0) || (useBgVideo && bgVideos.length > 0);
+  const hasNarration = !useNarration || narration.trim().length > 0;
+  const avatarNeedsNarration = useAvatar && avatarFile !== null && (!useNarration || narration.trim().length === 0);
+  const canGenerate = gpuOnline === true && !isGenerating && hasBg && hasNarration && useNarration && !avatarNeedsNarration;
 
   const handleAvatarFile = useCallback((f: File) => {
     if (!f.type.startsWith("image/")) return;
@@ -436,85 +485,129 @@ function LipSyncPage({ gpuOnline }: { gpuOnline: boolean | null }) {
     setAvatarPreview(url);
   }, []);
 
+  const handleSubmit = () => {
+    const voiceMap: Record<string, string> = { en: "en-US-JennyNeural", ro: "ro-RO-AlinaNeural" };
+    gen.submit({
+      mode: "video-pipeline",
+      file: useAvatar ? avatarFile : null,
+      bgImages: useBgImages ? bgImages : [],
+      bgVideos: useBgVideo  ? bgVideos : [],
+      extraBody: {
+        narration_text:        useNarration ? narration : "",
+        tts_engine:            ttsEngine,
+        tts_voice:             voiceMap[lang] ?? "en-US-JennyNeural",
+        lang,
+        no_zoom:               noZoom,
+        no_subtitles:          noSubs,
+        fixed_scene_duration:  fixedDur ? sceneDur : null,
+      },
+    });
+  };
+
   return (
     <div className="page-layout">
-      <div className="controls-card">
-        <div className="field-group">
-          <label className="field-label">Avatar Image</label>
-          <UploadZone file={avatarFile} preview={avatarPreview} onFile={handleAvatarFile} label="Drop avatar image or click to upload" />
-        </div>
+      <div className="controls-card" style={{ flex: "0 0 420px" }}>
+        <div className="pipeline-header">CONȚINUT OPȚIONAL</div>
 
-        <div className="field-group">
-          <label className="field-label">Audio Source</label>
-          <div className="toggle-group">
-            <button type="button" className={`toggle-btn ${audioMode === "tts" ? "active" : ""}`} onClick={() => setAudioMode("tts")}>
-              Text to Speech
-            </button>
-            <button type="button" className={`toggle-btn ${audioMode === "upload" ? "active" : ""}`} onClick={() => setAudioMode("upload")}>
-              Upload Audio
-            </button>
-          </div>
-        </div>
+        <PipelineSection label="Imagini fundal"
+          desc="Înlocuiește generarea ComfyUI cu poze locale (PNG/JPG/WebP)"
+          enabled={useBgImages}
+          onToggle={v => { setUseBgImages(v); if (v) setUseBgVideo(false); }}>
+          <MultiUploadZone files={bgImages} onFiles={setBgImages} accept="image/*"
+            label="Trage imaginile sau click pentru selectare (multiple acceptate)" />
+        </PipelineSection>
 
-        {audioMode === "tts" ? (
-          <>
-            <div className="field-group">
-              <label className="field-label">Text</label>
-              <textarea className="textarea" placeholder="Type the text you want spoken..."
-                value={ttsText} onChange={e => setTtsText(e.target.value)} rows={4} />
-            </div>
-            <div className="field-group">
-              <label className="field-label">Voice</label>
-              <div className="select-wrap">
-                <select className="select" value={ttsVoice} onChange={e => setTtsVoice(e.target.value)}>
-                  {VOICES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
-                </select>
-                <IconChevronDown />
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="field-group">
-            <label className="field-label">Audio File (MP3 / WAV / FLAC)</label>
-            <div className={`upload-zone ${audioDrag ? "dragover" : ""} ${lsAudioFile ? "has-file" : ""}`}
-              onClick={() => audioInputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setAudioDrag(true); }}
-              onDragLeave={() => setAudioDrag(false)}
-              onDrop={e => { e.preventDefault(); setAudioDrag(false); const f = e.dataTransfer.files[0]; if (f) setLsAudioFile(f); }}>
-              <IconUpload />
-              <span className="upload-label">{lsAudioFile ? lsAudioFile.name : "Drop audio file or click to upload"}</span>
-              <input ref={audioInputRef} type="file" accept="audio/*" className="upload-input"
-                onChange={e => { const f = e.target.files?.[0]; if (f) setLsAudioFile(f); }} />
-            </div>
-          </div>
-        )}
+        <PipelineSection label="Video fundal"
+          desc="Folosește clipuri video existente în loc de imagini"
+          enabled={useBgVideo}
+          onToggle={v => { setUseBgVideo(v); if (v) setUseBgImages(false); }}>
+          <MultiUploadZone files={bgVideos} onFiles={setBgVideos} accept="video/*"
+            label="Trage video-urile sau click pentru selectare" />
+        </PipelineSection>
+
+        <PipelineSection label="Avatar lip-sync"
+          desc="Suprapune un avatar animat (LatentSync) în colțul de jos al video-ului"
+          enabled={useAvatar}
+          onToggle={setUseAvatar}>
+          <UploadZone file={avatarFile} preview={avatarPreview} onFile={handleAvatarFile}
+            label="Imaginea avatarului — PNG cu fundal transparent recomandat" />
+        </PipelineSection>
+
+        <PipelineSection label="Narațiune personalizată"
+          desc="Text scris de tine — fără generare AI"
+          enabled={useNarration}
+          onToggle={setUseNarration}>
+          <p className="pipeline-hint">
+            Format: Hook: pe primul rând, text, linie goală, Script:, linie goală, paragraf1, linie goală, paragraf2...
+          </p>
+          <textarea className="textarea" rows={8}
+            placeholder={"Hook:\nPrimul tău hook captivant.\n\nScript:\nParagraf scenă 1.\n\nParagraf scenă 2."}
+            value={narration} onChange={e => setNarration(e.target.value)} />
+        </PipelineSection>
 
         <div className="divider" />
+        <div className="pipeline-header">OPȚIUNI AVANSATE</div>
 
-        <div className="params-grid">
-          <div className="param">
-            <div className="param-header">
-              <span className="field-label" style={{ margin: 0 }}>Lip Expression</span>
-              <span className="param-value">{lipsExpr.toFixed(1)}</span>
+        <div className="advanced-grid">
+          <div className="field-group">
+            <label className="field-label">Motor TTS</label>
+            <div className="radio-group">
+              {(["kokoro", "edge"] as const).map(e => (
+                <label key={e} className="radio-opt">
+                  <input type="radio" checked={ttsEngine === e} onChange={() => setTtsEngine(e)} />
+                  {e === "kokoro" ? "Kokoro (EN)" : "Edge (RO)"}
+                </label>
+              ))}
             </div>
-            <input type="range" className="slider" min={0.5} max={3.0} step={0.1} value={lipsExpr}
-              onChange={e => setLipsExpr(Number(e.target.value))} />
           </div>
-          <div className="param">
-            <div className="param-header">
-              <span className="field-label" style={{ margin: 0 }}>Steps</span>
-              <span className="param-value">{lsSteps}</span>
+          <div className="field-group">
+            <label className="field-label">Limba scriptului</label>
+            <div className="radio-group">
+              {(["en", "ro"] as const).map(l => (
+                <label key={l} className="radio-opt">
+                  <input type="radio" checked={lang === l} onChange={() => setLang(l)} />
+                  {l === "en" ? "Engleză" : "Română"}
+                </label>
+              ))}
             </div>
-            <input type="range" className="slider" min={5} max={50} value={lsSteps}
-              onChange={e => setLsSteps(Number(e.target.value))} />
           </div>
         </div>
 
-        <button className="generate-btn" disabled={!canGenerate} onClick={() =>
-          gen.submit({ mode: "lip-sync", file: avatarFile, audioFile: audioMode === "upload" ? lsAudioFile : null,
-            extraBody: { tts_text: audioMode === "tts" ? ttsText : "", tts_voice: ttsVoice, lips_expression: lipsExpr, ls_steps: lsSteps } })}>
-          {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generating…") : "Generate Lip Sync"}
-        </button>
+        <div className="check-list">
+          <label className="check-opt">
+            <input type="checkbox" checked={fixedDur} onChange={e => setFixedDur(e.target.checked)} />
+            <span>Durată fixă per scenă</span>
+            {fixedDur && (
+              <input type="number" min={1} max={30} value={sceneDur}
+                onChange={e => setSceneDur(Number(e.target.value))}
+                className="seed-input" style={{ width: 64, marginLeft: 8 }} />
+            )}
+            {fixedDur && <span style={{ color: "var(--text-subtle)", fontSize: 12 }}>sec</span>}
+          </label>
+          <label className="check-opt">
+            <input type="checkbox" checked={noZoom} onChange={e => setNoZoom(e.target.checked)} />
+            <span>No zoom — imagini statice (fără efect Ken Burns)</span>
+          </label>
+          <label className="check-opt">
+            <input type="checkbox" checked={noSubs} onChange={e => setNoSubs(e.target.checked)} />
+            <span>No subtitles — sare arderea subtitrărilor (Whisper)</span>
+          </label>
+          <label className="check-opt" style={{ opacity: 0.4 }}>
+            <input type="checkbox" disabled />
+            <span>Wan I2V — animează fiecare imagine cu Wan 2.2 (în curând)</span>
+          </label>
+        </div>
+
+        <div className="pipeline-btn-row">
+          <button className="generate-btn" style={{ flex: 1 }}
+            disabled={!canGenerate} onClick={handleSubmit}>
+            {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generez…") : "▶ Pornește Pipeline"}
+          </button>
+          {!isGenerating && gen.status !== "idle" && (
+            <button className="action-btn action-btn-secondary" onClick={gen.reset}>↺ Reset</button>
+          )}
+        </div>
+
         {isGenerating && <ProgressBar value={gen.progress} />}
         {gen.status === "error" && <div className="error-box">{gen.error}</div>}
       </div>

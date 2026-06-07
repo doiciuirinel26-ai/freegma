@@ -31,6 +31,8 @@ export function useGeneration() {
     seed?: number;
     file?: File | null;
     audioFile?: File | null;
+    bgImages?: File[];
+    bgVideos?: File[];
     extraBody?: Record<string, unknown>;
   }) {
     stopPolling();
@@ -42,6 +44,12 @@ export function useGeneration() {
 
       let audio_file_id: string | undefined;
       if (params.audioFile) audio_file_id = await apiUpload(params.audioFile);
+
+      const bg_image_ids: string[] = [];
+      for (const f of (params.bgImages ?? [])) bg_image_ids.push(await apiUpload(f));
+
+      const bg_video_ids: string[] = [];
+      for (const f of (params.bgVideos ?? [])) bg_video_ids.push(await apiUpload(f));
 
       setState(s => ({ ...s, status: "queued", progress: 0.02 }));
 
@@ -56,6 +64,8 @@ export function useGeneration() {
         seed:        params.seed       ?? -1,
         file_id,
         audio_file_id,
+        bg_image_ids,
+        bg_video_ids,
         ...params.extraBody,
       });
 

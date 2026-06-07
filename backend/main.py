@@ -44,12 +44,12 @@ async def startup():
     global job_queue
     job_queue = asyncio.Queue()
     asyncio.create_task(worker())
-    print("✓ FREEGMA backend pornit pe portul 8000")
-    print("✓ Worker GPU activ")
+    print("[OK] FREEGMA backend pornit pe portul 8000")
+    print("[OK] Worker GPU activ")
 
 # ── Models ───────────────────────────────────────────────
 class GenerateRequest(BaseModel):
-    mode: str              # "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync"
+    mode: str              # "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync" | "video-pipeline"
     prompt: str = ""
     neg_prompt: str = ""
     model: str = "sdxl"
@@ -64,8 +64,22 @@ class GenerateRequest(BaseModel):
     tts_voice: str = "en-US-JennyNeural"
     lips_expression: float = 1.8
     ls_steps: int = 20
+    # Video pipeline specific
+    bg_image_ids: list = []
+    bg_video_ids: list = []
+    narration_text: str = ""
+    tts_engine: str = "edge"      # "kokoro" | "edge"
+    lang: str = "en"              # "en" | "ro"
+    no_zoom: bool = False
+    no_subtitles: bool = False
+    fixed_scene_duration: Optional[float] = None
 
 # ── Routes ───────────────────────────────────────────────
+@app.get("/api/debug-key")
+async def debug_key():
+    from middleware.auth import API_KEY
+    return {"api_key": API_KEY, "len": len(API_KEY)}
+
 @app.get("/api/health")
 async def health():
     return {
@@ -201,6 +215,18 @@ async def worker():
                     avatar_path, audio_path,
                     req.tts_text, req.tts_voice,
                     req.lips_expression, req.ls_steps,
+                    out_dir, update,
+                )
+            elif req.mode == "video-pipeline":
+                from generators.video_pipeline_gen import generate_video_pipeline
+                bg_image_paths = [_find_upload(fid) for fid in (req.bg_image_ids or [])]
+                bg_video_paths = [_find_upload(fid) for fid in (req.bg_video_ids or [])]
+                avatar_path_vp = _find_upload(req.file_id) if req.file_id else None
+                result_path = await asyncio.to_thread(
+                    generate_video_pipeline,
+                    bg_image_paths, bg_video_paths, avatar_path_vp,
+                    req.narration_text, req.tts_engine, req.tts_voice, req.lang,
+                    req.no_zoom, req.no_subtitles, req.fixed_scene_duration,
                     out_dir, update,
                 )
             else:
