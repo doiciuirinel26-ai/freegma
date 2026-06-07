@@ -5,10 +5,10 @@ import { apiHealth } from "./api/client";
 type Category = "text-to-image" | "image-to-3d" | "image-to-video";
 type AudioMode = "tts" | "upload";
 
-const MODELS: Record<Category, { id: string; label: string }[]> = {
+const MODELS: Record<Category, { id: string; label: string; disabled?: boolean }[]> = {
   "text-to-image": [
     { id: "sdxl", label: "SDXL 1.0" },
-    { id: "sdxl", label: "FLUX 1.1 (soon)" },
+    { id: "sdxl", label: "FLUX 1.1 (soon)", disabled: true },
   ],
   "image-to-3d": [
     { id: "triposr",     label: "TripoSR (fast, ~30s)" },
@@ -18,7 +18,7 @@ const MODELS: Record<Category, { id: string; label: string }[]> = {
   ],
   "image-to-video": [
     { id: "wan2video",  label: "WAN 2.2 I2V (fast, ~30s)" },
-    { id: "hunyuan15", label: "HunyuanVideo 1.5 (quality, ~8min)" },
+    { id: "hunyuan15", label: "HunyuanVideo 1.5 — Not Available", disabled: true },
   ],
 };
 
@@ -184,7 +184,7 @@ function AIStudioPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
           <label className="field-label" htmlFor="ai-model-select">Model</label>
           <div className="select-wrap">
             <select id="ai-model-select" className="select" value={model} onChange={e => setModel(e.target.value)}>
-              {MODELS[category].map(m => <option key={m.id + m.label} value={m.id}>{m.label}</option>)}
+              {MODELS[category].map(m => <option key={m.id + m.label} value={m.id} disabled={m.disabled}>{m.label}</option>)}
             </select>
             <IconChevronDown />
           </div>
@@ -566,7 +566,10 @@ export default function App() {
           exposure="1.2"
           camera-orbit="0deg 80deg 105%"
           interaction-prompt="none"
-        />
+        >
+          {/* @ts-ignore */}
+          <span slot="error" className="logo-fallback">FREEGMA</span>
+        </model-viewer>
         <div className="header-meta">
           <span className="status-pill">
             <span className={`status-dot ${gpuOnline ? "online" : "offline"}`} />

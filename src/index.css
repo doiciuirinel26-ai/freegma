@@ -123,6 +123,16 @@ input[type="number"] {
 .logo-3d:active {
   cursor: grabbing;
 }
+.logo-fallback {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #a855f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
 
 .header-meta {
   display: flex;
