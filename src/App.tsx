@@ -553,7 +553,6 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        {/* @ts-ignore */}
         <model-viewer
           className="logo-3d"
           src="/freegma_logo.glb"
@@ -567,7 +566,6 @@ export default function App() {
           camera-orbit="0deg 80deg 105%"
           interaction-prompt="none"
         >
-          {/* @ts-ignore */}
           <span slot="error" className="logo-fallback">FREEGMA</span>
         </model-viewer>
         <div className="header-meta">
