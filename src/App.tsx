@@ -2,10 +2,10 @@ import { useCallback, useRef, useState, useEffect } from "react";
 import { useGeneration } from "./hooks/useGeneration";
 import { apiHealth } from "./api/client";
 
-type Category = "text-to-image" | "image-to-3d" | "image-to-video";
+type Page = "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync";
 type AudioMode = "tts" | "upload";
 
-const MODELS: Record<Category, { id: string; label: string; disabled?: boolean }[]> = {
+const MODELS = {
   "text-to-image": [
     { id: "sdxl", label: "SDXL 1.0" },
     { id: "sdxl", label: "FLUX 1.1 (soon)", disabled: true },
@@ -24,13 +24,7 @@ const MODELS: Record<Category, { id: string; label: string; disabled?: boolean }
 
 const RESOLUTIONS = ["512×512", "768×768", "1024×1024"];
 
-const TABS: { id: Category; label: string }[] = [
-  { id: "text-to-image",  label: "Text → Image" },
-  { id: "image-to-3d",    label: "Image → 3D" },
-  { id: "image-to-video", label: "Image → Video" },
-];
-
-const VOICES: { id: string; label: string }[] = [
+const VOICES = [
   { id: "en-US-JennyNeural",  label: "English — Jenny (Female)" },
   { id: "en-US-GuyNeural",    label: "English — Guy (Male)" },
   { id: "en-US-AriaNeural",   label: "English — Aria (Female)" },
@@ -51,9 +45,16 @@ const STATUS_LABELS: Record<string, string> = {
   error:     "Error",
 };
 
+const NAV: { id: Page; label: string }[] = [
+  { id: "text-to-image",  label: "Text → Image" },
+  { id: "image-to-3d",    label: "Image → 3D" },
+  { id: "image-to-video", label: "Image → Video" },
+  { id: "lip-sync",       label: "Lip Sync" },
+];
+
 function randomSeed() { return Math.floor(Math.random() * 2_147_483_647); }
 
-/* ── Icons ────────────────────────────────────────────── */
+/* ── Icons ───────────────────────────────────────────────────────── */
 function IconChevronDown() {
   return (
     <svg className="select-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -71,7 +72,7 @@ function IconUpload() {
 }
 function IconImage() {
   return (
-    <svg className="output-empty-icon" width="28" height="28" viewBox="0 0 28 28" fill="none">
+    <svg className="output-empty-icon" width="32" height="32" viewBox="0 0 28 28" fill="none">
       <rect x="3" y="5" width="22" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" />
       <circle cx="10" cy="11" r="2" stroke="currentColor" strokeWidth="1.5" />
       <path d="M3 19L9 13L14 18L19 13L25 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -80,7 +81,7 @@ function IconImage() {
 }
 function IconVideo() {
   return (
-    <svg className="output-empty-icon" width="28" height="28" viewBox="0 0 28 28" fill="none">
+    <svg className="output-empty-icon" width="32" height="32" viewBox="0 0 28 28" fill="none">
       <rect x="2" y="7" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
       <path d="M20 11L26 8V20L20 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -88,7 +89,7 @@ function IconVideo() {
 }
 function IconCube() {
   return (
-    <svg width="36" height="36" viewBox="0 0 40 40" fill="none" style={{ color: "var(--text-subtle)" }}>
+    <svg className="output-empty-icon" width="32" height="32" viewBox="0 0 40 40" fill="none">
       <path d="M20 6L34 14V26L20 34L6 26V14L20 6Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
       <path d="M20 6V34M6 14L20 22L34 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
@@ -121,328 +122,335 @@ function IconAR() {
   );
 }
 
-/* ── Progress bar ─────────────────────────────────────── */
+/* ── Shared components ───────────────────────────────────────────── */
 function ProgressBar({ value }: { value: number }) {
   return (
-    <div className="progress-track" style={{ marginTop: 8 }}>
+    <div className="progress-track">
       <div className="progress-bar" style={{ width: `${Math.round(value * 100)}%`, transition: "width 0.4s ease" }} />
     </div>
   );
 }
 
-/* ── AI Studio Panel ──────────────────────────────────── */
-function AIStudioPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
-  const [category, setCategory] = useState<Category>("text-to-image");
-  const [model, setModel]       = useState(MODELS["text-to-image"][0].id);
-  const [prompt, setPrompt]     = useState("");
-  const [negPrompt, setNegPrompt] = useState("");
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [steps, setSteps]       = useState(30);
-  const [cfg, setCfg]           = useState(7);
-  const [resolution, setResolution] = useState(RESOLUTIONS[2]);
-  const [seed, setSeed]         = useState(randomSeed);
-  const fileInputRef      = useRef<HTMLInputElement>(null);
-  const uploadPreviewRef  = useRef<string | null>(null);
-  const modelViewerRef    = useRef<any>(null);
-
-  const gen         = useGeneration();
-  const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
-
-  const handleCategoryChange = (cat: Category) => {
-    setCategory(cat);
-    setModel(MODELS[cat][0].id);
-    gen.reset();
-  };
-
-  const handleFile = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) return;
-    setUploadedFile(file);
-    if (uploadPreviewRef.current) URL.revokeObjectURL(uploadPreviewRef.current);
-    const url = URL.createObjectURL(file);
-    uploadPreviewRef.current = url;
-    setUploadPreview(url);
-  }, []);
-
-  const canGenerate =
-    gpuOnline === true &&
-    !isGenerating &&
-    (category === "text-to-image" ? prompt.trim().length > 0 : uploadedFile !== null);
-
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
-    await gen.submit({ mode: category, prompt, negPrompt, model, steps, cfg, resolution, seed, file: uploadedFile });
-  };
-
+function ModelSelect({ models, value, onChange }: {
+  models: { id: string; label: string; disabled?: boolean }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
   return (
-    <div className="panel-col">
-      <section className="card card-section">
-        <h2 className="panel-title">AI Studio</h2>
-
-        <div className="tab-list" role="tablist">
-          {TABS.map(tab => (
-            <button key={tab.id} role="tab" aria-selected={category === tab.id}
-              className={`tab ${category === tab.id ? "active" : ""}`}
-              onClick={() => handleCategoryChange(tab.id)}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div>
-          <label className="field-label" htmlFor="ai-model-select">Model</label>
-          <div className="select-wrap">
-            <select id="ai-model-select" className="select" value={model} onChange={e => setModel(e.target.value)}>
-              {MODELS[category].map(m => <option key={m.id + m.label} value={m.id} disabled={m.disabled}>{m.label}</option>)}
-            </select>
-            <IconChevronDown />
-          </div>
-        </div>
-
-        {category === "text-to-image" ? (
-          <>
-            <textarea className="textarea"
-              placeholder="Describe the image (English gives best results)..."
-              value={prompt} onChange={e => setPrompt(e.target.value)} rows={4} />
-            <textarea className="textarea"
-              placeholder="Negative prompt (optional)..."
-              value={negPrompt} onChange={e => setNegPrompt(e.target.value)} rows={2}
-              style={{ marginTop: 8 }} />
-          </>
-        ) : (
-          <>
-            <div
-              className={`upload-zone ${dragOver ? "dragover" : ""} ${uploadedFile ? "has-file" : ""}`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}>
-              {uploadPreview
-                ? <img src={uploadPreview} alt="Preview" style={{ maxHeight: 80, maxWidth: "100%", borderRadius: 4, objectFit: "contain" }} />
-                : <IconUpload />}
-              <span className="upload-label">{uploadedFile ? "Click or drop to replace" : "Drop image or click to upload"}</span>
-              {uploadedFile && <span className="upload-filename">{uploadedFile.name}</span>}
-              <input ref={fileInputRef} type="file" accept="image/*" className="upload-input"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-            </div>
-            {category === "image-to-video" && (
-              <>
-                <textarea className="textarea"
-                  placeholder="Describe the motion / action in the video (optional, English recommended)..."
-                  value={prompt} onChange={e => setPrompt(e.target.value)} rows={3}
-                  style={{ marginTop: 8 }} />
-                <textarea className="textarea"
-                  placeholder="Negative prompt (optional)..."
-                  value={negPrompt} onChange={e => setNegPrompt(e.target.value)} rows={2}
-                  style={{ marginTop: 8 }} />
-              </>
-            )}
-          </>
-        )}
-
-        <div className="divider" />
-
-        {category === "text-to-image" && (
-          <div className="params-grid">
-            <div className="param">
-              <div className="param-header">
-                <span className="field-label" style={{ margin: 0 }}>Steps</span>
-                <span className="param-value">{steps}</span>
-              </div>
-              <input type="range" className="slider" min={1} max={60} value={steps}
-                onChange={e => setSteps(Number(e.target.value))} />
-            </div>
-            <div className="param">
-              <div className="param-header">
-                <span className="field-label" style={{ margin: 0 }}>CFG Scale</span>
-                <span className="param-value">{cfg}</span>
-              </div>
-              <input type="range" className="slider" min={1} max={20} value={cfg}
-                onChange={e => setCfg(Number(e.target.value))} />
-            </div>
-            <div className="param">
-              <label className="field-label" htmlFor="res-select">Resolution</label>
-              <div className="select-wrap">
-                <select id="res-select" className="select" value={resolution}
-                  onChange={e => setResolution(e.target.value)}>
-                  {RESOLUTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <IconChevronDown />
-              </div>
-            </div>
-            <div className="param">
-              <label className="field-label" htmlFor="seed-input">Seed</label>
-              <div className="seed-row">
-                <input id="seed-input" type="number" className="seed-input" value={seed}
-                  onChange={e => setSeed(Number(e.target.value))} />
-                <button type="button" className="dice-btn" onClick={() => setSeed(randomSeed())}>
-                  <IconDice />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <button type="button" className="generate-btn" disabled={!canGenerate} onClick={handleGenerate}>
-          {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generating…") : "Generate"}
-        </button>
-
-        {isGenerating && <ProgressBar value={gen.progress} />}
-
-        {gen.status === "error" && <div className="error-box">{gen.error}</div>}
-      </section>
-
-      <section className="card output-card">
-        <div className={`output-preview ${gen.resultUrl ? "has-result" : ""}`}>
-          {!gen.resultUrl ? (
-            isGenerating ? (
-              <div style={{ textAlign: "center", width: "100%", padding: "0 20px" }}>
-                <div style={{ color: "var(--accent)", marginBottom: 8 }}>{STATUS_LABELS[gen.status]}</div>
-                <ProgressBar value={gen.progress} />
-              </div>
-            ) : category === "image-to-3d" ? (
-              <><IconCube /><span className="output-empty-text">3D result appears here</span></>
-            ) : category === "image-to-video" ? (
-              <><IconVideo /><span className="output-empty-text">Video result appears here</span></>
-            ) : (
-              <><IconImage /><span className="output-empty-text">Result appears here</span></>
-            )
-          ) : (
-            category === "text-to-image" ? (
-              <img className="output-image" src={gen.resultUrl} alt="Generated" />
-            ) : category === "image-to-video" ? (
-              <video className="output-image" src={gen.resultUrl} controls autoPlay loop muted
-                style={{ width: "100%", borderRadius: 6 }} />
-            ) : (
-              <div style={{ width: "100%", height: 300, background: "#111", borderRadius: 6, overflow: "hidden" }}>
-                {/* @ts-ignore */}
-                <model-viewer ref={modelViewerRef} src={gen.resultUrl} alt="3D Model" auto-rotate camera-controls
-                  ar ar-modes="scene-viewer webxr quick-look"
-                  style={{ width: "100%", height: "100%" }} />
-              </div>
-            )
-          )}
-        </div>
-        <div className="output-actions">
-          <a href={gen.resultUrl ?? "#"} download className="download-btn"
-            style={{ pointerEvents: gen.resultUrl ? "auto" : "none", opacity: gen.resultUrl ? 1 : 0.4,
-                     textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
-            <IconDownload />Download
-          </a>
-          {category === "image-to-3d" && gen.resultUrl && (
-            <button
-              className="download-btn"
-              style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--accent)", color: "#000", border: "none", cursor: "pointer" }}
-              onClick={() => {
-                if (modelViewerRef.current?.activateAR) {
-                  modelViewerRef.current.activateAR();
-                } else {
-                  window.open(`https://arvr.google.com/scene-viewer/1.0?file=${encodeURIComponent(gen.resultUrl!)}&mode=ar_preferred`, "_blank");
-                }
-              }}
-            >
-              <IconAR />AR
-            </button>
-          )}
-          {gen.status === "done" && (
-            <button className="dice-btn" style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
-              onClick={gen.reset}>
-              New generation
-            </button>
-          )}
-        </div>
-      </section>
+    <div className="field-group">
+      <label className="field-label">Model</label>
+      <div className="select-wrap">
+        <select className="select" value={value} onChange={e => onChange(e.target.value)}>
+          {models.map(m => <option key={m.id + m.label} value={m.id} disabled={m.disabled}>{m.label}</option>)}
+        </select>
+        <IconChevronDown />
+      </div>
     </div>
   );
 }
 
-/* ── Lip Sync Panel ───────────────────────────────────── */
-function LipSyncPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
-  const [avatarFile, setAvatarFile]     = useState<File | null>(null);
+function UploadZone({ file, preview, onFile, label }: {
+  file: File | null;
+  preview: string | null;
+  onFile: (f: File) => void;
+  label?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  return (
+    <div
+      className={`upload-zone ${dragOver ? "dragover" : ""} ${file ? "has-file" : ""}`}
+      onClick={() => inputRef.current?.click()}
+      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}>
+      {preview
+        ? <img src={preview} alt="Preview" style={{ maxHeight: 90, maxWidth: "100%", borderRadius: 4, objectFit: "contain" }} />
+        : <IconUpload />}
+      <span className="upload-label">{file ? "Click or drop to replace" : (label ?? "Drop image or click to upload")}</span>
+      {file && <span className="upload-filename">{file.name}</span>}
+      <input ref={inputRef} type="file" accept="image/*" className="upload-input"
+        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+    </div>
+  );
+}
+
+function OutputCard({ gen, is3d, isVideo }: { gen: ReturnType<typeof useGeneration>; is3d?: boolean; isVideo?: boolean }) {
+  const modelViewerRef = useRef<any>(null);
+  const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
+
+  return (
+    <div className="output-card">
+      <div className={`output-preview ${gen.resultUrl ? "has-result" : ""}`}>
+        {!gen.resultUrl ? (
+          isGenerating ? (
+            <div className="output-generating">
+              <span className="output-generating-label">{STATUS_LABELS[gen.status]}</span>
+              <ProgressBar value={gen.progress} />
+            </div>
+          ) : is3d ? (
+            <><IconCube /><span className="output-empty-text">3D model appears here</span></>
+          ) : isVideo ? (
+            <><IconVideo /><span className="output-empty-text">Video appears here</span></>
+          ) : (
+            <><IconImage /><span className="output-empty-text">Result appears here</span></>
+          )
+        ) : is3d ? (
+          <div style={{ width: "100%", height: "100%" }}>
+            {/* @ts-ignore */}
+            <model-viewer ref={modelViewerRef} src={gen.resultUrl} alt="3D Model" auto-rotate camera-controls
+              ar ar-modes="scene-viewer webxr quick-look"
+              style={{ width: "100%", height: "100%" }} />
+          </div>
+        ) : isVideo ? (
+          <video src={gen.resultUrl} controls autoPlay loop muted style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        ) : (
+          <img src={gen.resultUrl} alt="Generated" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        )}
+      </div>
+
+      {gen.status === "error" && <div className="error-box">{gen.error}</div>}
+
+      <div className="output-actions">
+        <a href={gen.resultUrl ?? "#"} download className="action-btn"
+          style={{ pointerEvents: gen.resultUrl ? "auto" : "none", opacity: gen.resultUrl ? 1 : 0.4, textDecoration: "none" }}>
+          <IconDownload />Download
+        </a>
+        {is3d && gen.resultUrl && (
+          <button className="action-btn action-btn-ar"
+            onClick={() => {
+              if (modelViewerRef.current?.activateAR) {
+                modelViewerRef.current.activateAR();
+              } else {
+                window.open(`https://arvr.google.com/scene-viewer/1.0?file=${encodeURIComponent(gen.resultUrl!)}&mode=ar_preferred`, "_blank");
+              }
+            }}>
+            <IconAR />AR
+          </button>
+        )}
+        {gen.status === "done" && (
+          <button className="action-btn action-btn-secondary" style={{ marginLeft: "auto" }} onClick={gen.reset}>
+            New generation
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Pages ───────────────────────────────────────────────────────── */
+function TextToImagePage({ gpuOnline }: { gpuOnline: boolean | null }) {
+  const [model, setModel]       = useState(MODELS["text-to-image"][0].id);
+  const [prompt, setPrompt]     = useState("");
+  const [negPrompt, setNegPrompt] = useState("");
+  const [steps, setSteps]       = useState(30);
+  const [cfg, setCfg]           = useState(7);
+  const [resolution, setResolution] = useState(RESOLUTIONS[2]);
+  const [seed, setSeed]         = useState(randomSeed);
+  const gen = useGeneration();
+  const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
+  const canGenerate = gpuOnline === true && !isGenerating && prompt.trim().length > 0;
+
+  return (
+    <div className="page-layout">
+      <div className="controls-card">
+        <ModelSelect models={MODELS["text-to-image"]} value={model} onChange={setModel} />
+
+        <div className="field-group">
+          <label className="field-label">Prompt</label>
+          <textarea className="textarea" placeholder="Describe the image (English gives best results)..."
+            value={prompt} onChange={e => setPrompt(e.target.value)} rows={4} />
+        </div>
+        <div className="field-group">
+          <label className="field-label">Negative Prompt</label>
+          <textarea className="textarea" placeholder="What to avoid (optional)..."
+            value={negPrompt} onChange={e => setNegPrompt(e.target.value)} rows={2} />
+        </div>
+
+        <div className="divider" />
+
+        <div className="params-grid">
+          <div className="param">
+            <div className="param-header">
+              <span className="field-label" style={{ margin: 0 }}>Steps</span>
+              <span className="param-value">{steps}</span>
+            </div>
+            <input type="range" className="slider" min={1} max={60} value={steps} onChange={e => setSteps(Number(e.target.value))} />
+          </div>
+          <div className="param">
+            <div className="param-header">
+              <span className="field-label" style={{ margin: 0 }}>CFG Scale</span>
+              <span className="param-value">{cfg}</span>
+            </div>
+            <input type="range" className="slider" min={1} max={20} value={cfg} onChange={e => setCfg(Number(e.target.value))} />
+          </div>
+          <div className="param">
+            <label className="field-label">Resolution</label>
+            <div className="select-wrap">
+              <select className="select" value={resolution} onChange={e => setResolution(e.target.value)}>
+                {RESOLUTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <IconChevronDown />
+            </div>
+          </div>
+          <div className="param">
+            <label className="field-label">Seed</label>
+            <div className="seed-row">
+              <input type="number" className="seed-input" value={seed} onChange={e => setSeed(Number(e.target.value))} />
+              <button type="button" className="dice-btn" onClick={() => setSeed(randomSeed())}><IconDice /></button>
+            </div>
+          </div>
+        </div>
+
+        <button className="generate-btn" disabled={!canGenerate} onClick={() =>
+          gen.submit({ mode: "text-to-image", prompt, negPrompt, model, steps, cfg, resolution, seed, file: null })}>
+          {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generating…") : "Generate"}
+        </button>
+        {isGenerating && <ProgressBar value={gen.progress} />}
+        {gen.status === "error" && <div className="error-box">{gen.error}</div>}
+      </div>
+
+      <OutputCard gen={gen} />
+    </div>
+  );
+}
+
+function ImageTo3DPage({ gpuOnline }: { gpuOnline: boolean | null }) {
+  const [model, setModel]   = useState(MODELS["image-to-3d"][0].id);
+  const [file, setFile]     = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const previewRef = useRef<string | null>(null);
+  const gen = useGeneration();
+  const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
+  const canGenerate = gpuOnline === true && !isGenerating && file !== null;
+
+  const handleFile = useCallback((f: File) => {
+    if (!f.type.startsWith("image/")) return;
+    setFile(f);
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    const url = URL.createObjectURL(f);
+    previewRef.current = url;
+    setPreview(url);
+  }, []);
+
+  return (
+    <div className="page-layout">
+      <div className="controls-card">
+        <ModelSelect models={MODELS["image-to-3d"]} value={model} onChange={setModel} />
+
+        <div className="field-group">
+          <label className="field-label">Input Image</label>
+          <UploadZone file={file} preview={preview} onFile={handleFile} />
+        </div>
+
+        <button className="generate-btn" disabled={!canGenerate} onClick={() =>
+          gen.submit({ mode: "image-to-3d", prompt: "", negPrompt: "", model, steps: 30, cfg: 7, resolution: "1024×1024", seed: -1, file })}>
+          {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generating…") : "Generate 3D"}
+        </button>
+        {isGenerating && <ProgressBar value={gen.progress} />}
+        {gen.status === "error" && <div className="error-box">{gen.error}</div>}
+      </div>
+
+      <OutputCard gen={gen} is3d />
+    </div>
+  );
+}
+
+function ImageToVideoPage({ gpuOnline }: { gpuOnline: boolean | null }) {
+  const [model, setModel]     = useState(MODELS["image-to-video"][0].id);
+  const [file, setFile]       = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [prompt, setPrompt]   = useState("");
+  const [negPrompt, setNegPrompt] = useState("");
+  const previewRef = useRef<string | null>(null);
+  const gen = useGeneration();
+  const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
+  const canGenerate = gpuOnline === true && !isGenerating && file !== null;
+
+  const handleFile = useCallback((f: File) => {
+    if (!f.type.startsWith("image/")) return;
+    setFile(f);
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    const url = URL.createObjectURL(f);
+    previewRef.current = url;
+    setPreview(url);
+  }, []);
+
+  return (
+    <div className="page-layout">
+      <div className="controls-card">
+        <ModelSelect models={MODELS["image-to-video"]} value={model} onChange={setModel} />
+
+        <div className="field-group">
+          <label className="field-label">Input Image</label>
+          <UploadZone file={file} preview={preview} onFile={handleFile} />
+        </div>
+
+        <div className="field-group">
+          <label className="field-label">Motion Prompt <span style={{ color: "var(--text-subtle)", fontWeight: 400 }}>(optional)</span></label>
+          <textarea className="textarea" placeholder="Describe the motion / action in the video..."
+            value={prompt} onChange={e => setPrompt(e.target.value)} rows={3} />
+        </div>
+        <div className="field-group">
+          <label className="field-label">Negative Prompt <span style={{ color: "var(--text-subtle)", fontWeight: 400 }}>(optional)</span></label>
+          <textarea className="textarea" placeholder="What to avoid..."
+            value={negPrompt} onChange={e => setNegPrompt(e.target.value)} rows={2} />
+        </div>
+
+        <button className="generate-btn" disabled={!canGenerate} onClick={() =>
+          gen.submit({ mode: "image-to-video", prompt, negPrompt, model, steps: 30, cfg: 7, resolution: "1024×1024", seed: -1, file })}>
+          {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generating…") : "Generate Video"}
+        </button>
+        {isGenerating && <ProgressBar value={gen.progress} />}
+        {gen.status === "error" && <div className="error-box">{gen.error}</div>}
+      </div>
+
+      <OutputCard gen={gen} isVideo />
+    </div>
+  );
+}
+
+function LipSyncPage({ gpuOnline }: { gpuOnline: boolean | null }) {
+  const [avatarFile, setAvatarFile]   = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [avatarDrag, setAvatarDrag]     = useState(false);
-  const [lsAudioFile, setLsAudioFile]   = useState<File | null>(null);
-  const [audioDrag, setAudioDrag]       = useState(false);
-  const [audioMode, setAudioMode]       = useState<AudioMode>("tts");
-  const [ttsText, setTtsText]           = useState("");
-  const [ttsVoice, setTtsVoice]         = useState("en-US-JennyNeural");
-  const [lipsExpr, setLipsExpr]         = useState(1.8);
-  const [lsSteps, setLsSteps]           = useState(20);
-
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-  const audioInputRef  = useRef<HTMLInputElement>(null);
+  const [lsAudioFile, setLsAudioFile] = useState<File | null>(null);
+  const [audioMode, setAudioMode]     = useState<AudioMode>("tts");
+  const [ttsText, setTtsText]         = useState("");
+  const [ttsVoice, setTtsVoice]       = useState("en-US-JennyNeural");
+  const [lipsExpr, setLipsExpr]       = useState(1.8);
+  const [lsSteps, setLsSteps]         = useState(20);
   const avatarUrlRef   = useRef<string | null>(null);
-
-  const lsGen        = useGeneration();
-  const isGenerating = ["uploading", "queued", "running"].includes(lsGen.status);
-
-  const canGenerate =
-    gpuOnline === true &&
-    !isGenerating &&
-    avatarFile !== null &&
+  const audioInputRef  = useRef<HTMLInputElement>(null);
+  const [audioDrag, setAudioDrag]     = useState(false);
+  const gen = useGeneration();
+  const isGenerating = ["uploading", "queued", "running"].includes(gen.status);
+  const canGenerate = gpuOnline === true && !isGenerating && avatarFile !== null &&
     (audioMode === "upload" ? lsAudioFile !== null : ttsText.trim().length > 0);
 
-  const handleAvatarFile = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) return;
-    setAvatarFile(file);
+  const handleAvatarFile = useCallback((f: File) => {
+    if (!f.type.startsWith("image/")) return;
+    setAvatarFile(f);
     if (avatarUrlRef.current) URL.revokeObjectURL(avatarUrlRef.current);
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(f);
     avatarUrlRef.current = url;
     setAvatarPreview(url);
   }, []);
 
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
-    await lsGen.submit({
-      mode: "lip-sync",
-      file: avatarFile,
-      audioFile: audioMode === "upload" ? lsAudioFile : null,
-      extraBody: {
-        tts_text:        audioMode === "tts" ? ttsText : "",
-        tts_voice:       ttsVoice,
-        lips_expression: lipsExpr,
-        ls_steps:        lsSteps,
-      },
-    });
-  };
-
   return (
-    <div className="panel-col">
-      <section className="card card-section">
-        <h2 className="panel-title">Lip Sync</h2>
-
-        {/* Avatar upload */}
-        <div>
+    <div className="page-layout">
+      <div className="controls-card">
+        <div className="field-group">
           <label className="field-label">Avatar Image</label>
-          <div
-            className={`upload-zone ${avatarDrag ? "dragover" : ""} ${avatarFile ? "has-file" : ""}`}
-            onClick={() => avatarInputRef.current?.click()}
-            onDragOver={e => { e.preventDefault(); setAvatarDrag(true); }}
-            onDragLeave={() => setAvatarDrag(false)}
-            onDrop={e => { e.preventDefault(); setAvatarDrag(false); const f = e.dataTransfer.files[0]; if (f) handleAvatarFile(f); }}>
-            {avatarPreview
-              ? <img src={avatarPreview} alt="Avatar" style={{ maxHeight: 80, maxWidth: "100%", borderRadius: 4, objectFit: "contain" }} />
-              : <IconUpload />}
-            <span className="upload-label">
-              {avatarFile ? "Click or drop to replace" : "Drop avatar image or click to upload"}
-            </span>
-            {avatarFile && <span className="upload-filename">{avatarFile.name}</span>}
-            <input ref={avatarInputRef} type="file" accept="image/*" className="upload-input"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleAvatarFile(f); }} />
-          </div>
+          <UploadZone file={avatarFile} preview={avatarPreview} onFile={handleAvatarFile} label="Drop avatar image or click to upload" />
         </div>
 
-        {/* Audio source toggle */}
-        <div>
+        <div className="field-group">
           <label className="field-label">Audio Source</label>
           <div className="toggle-group">
-            <button type="button" className={`toggle-btn ${audioMode === "tts" ? "active" : ""}`}
-              onClick={() => setAudioMode("tts")}>
+            <button type="button" className={`toggle-btn ${audioMode === "tts" ? "active" : ""}`} onClick={() => setAudioMode("tts")}>
               Text to Speech
             </button>
-            <button type="button" className={`toggle-btn ${audioMode === "upload" ? "active" : ""}`}
-              onClick={() => setAudioMode("upload")}>
+            <button type="button" className={`toggle-btn ${audioMode === "upload" ? "active" : ""}`} onClick={() => setAudioMode("upload")}>
               Upload Audio
             </button>
           </div>
@@ -450,14 +458,15 @@ function LipSyncPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
 
         {audioMode === "tts" ? (
           <>
-            <textarea className="textarea"
-              placeholder="Type the text you want spoken..."
-              value={ttsText} onChange={e => setTtsText(e.target.value)} rows={4} />
-            <div>
-              <label className="field-label" htmlFor="tts-voice-select">Voice</label>
+            <div className="field-group">
+              <label className="field-label">Text</label>
+              <textarea className="textarea" placeholder="Type the text you want spoken..."
+                value={ttsText} onChange={e => setTtsText(e.target.value)} rows={4} />
+            </div>
+            <div className="field-group">
+              <label className="field-label">Voice</label>
               <div className="select-wrap">
-                <select id="tts-voice-select" className="select" value={ttsVoice}
-                  onChange={e => setTtsVoice(e.target.value)}>
+                <select className="select" value={ttsVoice} onChange={e => setTtsVoice(e.target.value)}>
                   {VOICES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
                 </select>
                 <IconChevronDown />
@@ -465,22 +474,15 @@ function LipSyncPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
             </div>
           </>
         ) : (
-          <div>
+          <div className="field-group">
             <label className="field-label">Audio File (MP3 / WAV / FLAC)</label>
-            <div
-              className={`upload-zone ${audioDrag ? "dragover" : ""} ${lsAudioFile ? "has-file" : ""}`}
+            <div className={`upload-zone ${audioDrag ? "dragover" : ""} ${lsAudioFile ? "has-file" : ""}`}
               onClick={() => audioInputRef.current?.click()}
               onDragOver={e => { e.preventDefault(); setAudioDrag(true); }}
               onDragLeave={() => setAudioDrag(false)}
-              onDrop={e => {
-                e.preventDefault(); setAudioDrag(false);
-                const f = e.dataTransfer.files[0];
-                if (f) setLsAudioFile(f);
-              }}>
+              onDrop={e => { e.preventDefault(); setAudioDrag(false); const f = e.dataTransfer.files[0]; if (f) setLsAudioFile(f); }}>
               <IconUpload />
-              <span className="upload-label">
-                {lsAudioFile ? lsAudioFile.name : "Drop audio file or click to upload"}
-              </span>
+              <span className="upload-label">{lsAudioFile ? lsAudioFile.name : "Drop audio file or click to upload"}</span>
               <input ref={audioInputRef} type="file" accept="audio/*" className="upload-input"
                 onChange={e => { const f = e.target.files?.[0]; if (f) setLsAudioFile(f); }} />
             </div>
@@ -508,52 +510,24 @@ function LipSyncPanel({ gpuOnline }: { gpuOnline: boolean | null }) {
           </div>
         </div>
 
-        <button type="button" className="generate-btn" disabled={!canGenerate} onClick={handleGenerate}>
-          {isGenerating ? (STATUS_LABELS[lsGen.status] ?? "Generating…") : "Generate Lip Sync"}
+        <button className="generate-btn" disabled={!canGenerate} onClick={() =>
+          gen.submit({ mode: "lip-sync", file: avatarFile, audioFile: audioMode === "upload" ? lsAudioFile : null,
+            extraBody: { tts_text: audioMode === "tts" ? ttsText : "", tts_voice: ttsVoice, lips_expression: lipsExpr, ls_steps: lsSteps } })}>
+          {isGenerating ? (STATUS_LABELS[gen.status] ?? "Generating…") : "Generate Lip Sync"}
         </button>
+        {isGenerating && <ProgressBar value={gen.progress} />}
+        {gen.status === "error" && <div className="error-box">{gen.error}</div>}
+      </div>
 
-        {isGenerating && <ProgressBar value={lsGen.progress} />}
-
-        {lsGen.status === "error" && <div className="error-box">{lsGen.error}</div>}
-      </section>
-
-      <section className="card output-card">
-        <div className={`output-preview ${lsGen.resultUrl ? "has-result" : ""}`}>
-          {!lsGen.resultUrl ? (
-            isGenerating ? (
-              <div style={{ textAlign: "center", width: "100%", padding: "0 20px" }}>
-                <div style={{ color: "var(--accent)", marginBottom: 8 }}>{STATUS_LABELS[lsGen.status]}</div>
-                <ProgressBar value={lsGen.progress} />
-              </div>
-            ) : (
-              <><IconVideo /><span className="output-empty-text">Lip sync video appears here</span></>
-            )
-          ) : (
-            <video className="output-image" src={lsGen.resultUrl} controls autoPlay loop
-              style={{ width: "100%", borderRadius: 6 }} />
-          )}
-        </div>
-        <div className="output-actions">
-          <a href={lsGen.resultUrl ?? "#"} download className="download-btn"
-            style={{ pointerEvents: lsGen.resultUrl ? "auto" : "none", opacity: lsGen.resultUrl ? 1 : 0.4,
-                     textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
-            <IconDownload />Download
-          </a>
-          {lsGen.status === "done" && (
-            <button className="dice-btn" style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
-              onClick={lsGen.reset}>
-              New generation
-            </button>
-          )}
-        </div>
-      </section>
+      <OutputCard gen={gen} isVideo />
     </div>
   );
 }
 
-/* ── Main App ─────────────────────────────────────────── */
+/* ── App ─────────────────────────────────────────────────────────── */
 export default function App() {
-  const [gpuOnline, setGpuOnline]   = useState<boolean | null>(null);
+  const [page, setPage]           = useState<Page>("text-to-image");
+  const [gpuOnline, setGpuOnline] = useState<boolean | null>(null);
   const [queueCount, setQueueCount] = useState(0);
 
   useEffect(() => {
@@ -577,39 +551,42 @@ export default function App() {
   }, []);
 
   return (
-    <div className="page">
+    <div className="app">
       <header className="header">
-        <model-viewer
-          className="logo-3d"
-          src="/freegma_logo.glb"
-          auto-rotate
-          auto-rotate-delay="0"
-          rotation-per-second="20deg"
-          camera-controls
-          touch-action="pan-y"
-          shadow-intensity="0"
-          exposure="1.2"
-          camera-orbit="0deg 80deg 105%"
-          interaction-prompt="none"
-        >
-          <span slot="error" className="logo-fallback">FREEGMA</span>
-        </model-viewer>
-        <div className="disclaimer-banner">
-          ⚠️ The estimated times next to the models are given by Claude, but don't believe him, it actually takes longer.
+        <div className="header-top">
+          {/* @ts-ignore */}
+          <model-viewer className="logo-3d" src="/freegma_logo.glb" auto-rotate auto-rotate-delay="0"
+            rotation-per-second="20deg" camera-controls touch-action="pan-y"
+            shadow-intensity="0" exposure="1.2" camera-orbit="0deg 80deg 105%" interaction-prompt="none">
+            <span slot="error" className="logo-fallback">FREEGMA</span>
+          </model-viewer>
+          <div className="header-status">
+            <span className="status-pill">
+              <span className={`status-dot ${gpuOnline ? "online" : "offline"}`} />
+              {gpuOnline === null ? "Connecting..." : gpuOnline ? "GPU Online" : "GPU Offline"}
+            </span>
+            <span className="queue-badge">{queueCount} in queue</span>
+          </div>
         </div>
-        <div className="header-meta">
-          <span className="status-pill">
-            <span className={`status-dot ${gpuOnline ? "online" : "offline"}`} />
-            {gpuOnline === null ? "Connecting..." : gpuOnline ? "GPU Online" : "GPU Offline"}
-          </span>
-          <span className="queue-badge">{queueCount} jobs in queue</span>
-        </div>
+
+        <nav className="nav">
+          {NAV.map(n => (
+            <button key={n.id} className={`nav-tab ${page === n.id ? "active" : ""}`} onClick={() => setPage(n.id)}>
+              {n.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
-      <div className="workspace">
-        <AIStudioPanel gpuOnline={gpuOnline} />
-        <LipSyncPanel gpuOnline={gpuOnline} />
-      </div>
+      <main className="main">
+        <div className="disclaimer">
+          ⚠️ Estimated times are given by Claude — don't believe him, it actually takes longer.
+        </div>
+        {page === "text-to-image"  && <TextToImagePage  gpuOnline={gpuOnline} />}
+        {page === "image-to-3d"    && <ImageTo3DPage    gpuOnline={gpuOnline} />}
+        {page === "image-to-video" && <ImageToVideoPage gpuOnline={gpuOnline} />}
+        {page === "lip-sync"       && <LipSyncPage      gpuOnline={gpuOnline} />}
+      </main>
     </div>
   );
 }
