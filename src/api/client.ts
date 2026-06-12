@@ -43,3 +43,18 @@ export async function apiStatus(jobId: string) {
 export function resultUrl(jobId: string) {
   return `${BACKEND}/api/result/${jobId}${qs()}`;
 }
+
+export async function apiStudioRender(
+  clip_ids: string[],
+  transitions: { type: string; duration: number }[],
+  clip_durations: number[],
+): Promise<string> {
+  const r = await fetch(`${BACKEND}/api/studio/render${qs()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clip_ids, transitions, clip_durations }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  const blob = await r.blob();
+  return URL.createObjectURL(blob);
+}

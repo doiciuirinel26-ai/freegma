@@ -48,6 +48,16 @@ async def startup():
     print("[OK] Worker GPU activ")
 
 # ── Models ───────────────────────────────────────────────
+class TransitionSettings(BaseModel):
+    type: str = "cut"
+    duration: float = 0.0
+
+class StudioRenderRequest(BaseModel):
+    clip_ids: list[str]
+    transitions: list[TransitionSettings] = []
+    clip_durations: list[float] = []
+
+
 class GenerateRequest(BaseModel):
     mode: str              # "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync" | "video-pipeline"
     prompt: str = ""
@@ -131,6 +141,28 @@ async def generate(
     await job_queue.put((job_id, body))
     queue_pos = job_queue.qsize()
     return {"job_id": job_id, "queue_position": queue_pos}
+
+@app.post("/api/studio/render")
+async def studio_render(
+    body: StudioRenderRequest,
+    x_api_key: Optional[str] = Header(None),
+    key: Optional[str] = Query(None),
+):
+    validate_key(x_api_key or key)
+    clip_paths = [_find_upload(fid) for fid in body.clip_ids]
+
+    job_id = uuid.uuid4().hex
+    out_dir = TEMP_DIR / "results" / job_id
+    out_dir.mkdir(parents=True)
+
+    from generators.studio_render import render_clips
+    transitions_dicts = [{"type": t.type, "duration": t.duration} for t in body.transitions]
+    result_path = await asyncio.to_thread(
+        render_clips, clip_paths, transitions_dicts, out_dir, body.clip_durations
+    )
+    asyncio.create_task(_cleanup_later(job_id, out_dir))
+    return FileResponse(str(result_path), media_type="video/mp4", filename="studio_result.mp4")
+
 
 @app.get("/api/status/{job_id}")
 async def status(job_id: str, x_api_key: Optional[str] = Header(None), key: Optional[str] = Query(None)):
