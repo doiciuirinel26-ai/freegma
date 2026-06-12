@@ -14,7 +14,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-COMFYUI_URL = "http://127.0.0.1:8188"
+COMFYUI_URL       = "http://127.0.0.1:8188"
+# VHS extension does not expose POST /upload/audio — copy files directly instead
+COMFYUI_INPUT_DIR = Path(r"C:\Users\Fane sefu meu\ComfyUI\input")
 IMAGE_W     = 1080
 IMAGE_H     = 1920
 FPS         = 30
@@ -243,17 +245,8 @@ def _run_lipsync(avatar: Path, audio: Path, out: Path) -> Path:
     resp.raise_for_status()
     avatar_file = resp.json()["name"]
 
-    ext = audio.suffix.lower()[1:]
-    with open(audio, "rb") as f:
-        resp = requests.post(
-            f"{COMFYUI_URL}/upload/audio",
-            files={"audio": (audio.name, f,
-                             {"mp3": "audio/mpeg", "wav": "audio/wav",
-                              "flac": "audio/flac"}.get(ext, "audio/mpeg"))},
-            timeout=30,
-        )
-    resp.raise_for_status()
-    audio_file = resp.json()["name"]
+    shutil.copy2(audio, COMFYUI_INPUT_DIR / audio.name)
+    audio_file = audio.name
 
     workflow = {
         "1": {"class_type": "LoadImage", "inputs": {"image": avatar_file}},
@@ -262,7 +255,7 @@ def _run_lipsync(avatar: Path, audio: Path, out: Path) -> Path:
         "3": {"class_type": "GeekyLatentSyncNode",
               "inputs": {"images": ["1", 0], "audio": ["2", 0],
                          "seed": random.randint(0, 2**32 - 1),
-                         "lips_expression": 1.8, "steps": 20, "vram_usage": "medium"}},
+                         "lips_expression": 1.8, "inference_steps": 20, "vram_usage": "medium"}},
         "4": {"class_type": "VHS_VideoCombine",
               "inputs": {"images": ["3", 0], "audio": ["3", 1],
                          "frame_rate": LIPSYNC_FPS, "loop_count": 0,
@@ -455,18 +448,20 @@ def generate_video_pipeline(
             _make_canvas(p, c)
             canvases.append(c)
 
-        n = len(scenes)
-        scene_imgs = [canvases[min(i, len(canvases) - 1)] for i in range(n)]
-        durs = _calc_durations(scenes, audio_dur, fixed_scene_duration)
+        # Distribute images evenly across the full audio duration.
+        # Each image gets equal screen time regardless of narration paragraph count.
+        n_clips = len(canvases)
+        clip_dur = max((audio_dur + (n_clips - 1) * CROSSFADE) / n_clips, 2.5 + CROSSFADE)
+        durs = [clip_dur] * n_clips
 
         clips_dir = out_dir / "clips"
         clips_dir.mkdir(exist_ok=True)
         clips = []
-        for i, (img, dur) in enumerate(zip(scene_imgs, durs)):
+        for i, (canvas, dur) in enumerate(zip(canvases, durs)):
             clip = clips_dir / f"clip_{i:03d}.mp4"
-            _scene_clip(img, dur, clip, i, no_zoom)
+            _scene_clip(canvas, dur, clip, i, no_zoom)
             clips.append(clip)
-            if update: update(0.18 + 0.35 * (i + 1) / n)
+            if update: update(0.18 + 0.35 * (i + 1) / n_clips)
 
         _xfade_concat(clips, durs, bg_silent)
     else:
