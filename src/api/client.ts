@@ -57,6 +57,6 @@ export async function apiStudioRender(
     body: JSON.stringify({ clip_ids, transitions, clip_durations, audio_id, audio_offset: audio_offset ?? 0 }),
   });
   if (!r.ok) throw new Error(await r.text());
-  const blob = await r.blob();
-  return URL.createObjectURL(blob);
+  const data = await r.json();
+  return data.job_id;
 }

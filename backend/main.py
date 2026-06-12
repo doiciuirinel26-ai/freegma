@@ -151,21 +151,43 @@ async def studio_render(
     key: Optional[str] = Query(None),
 ):
     validate_key(x_api_key or key)
-    clip_paths = [_find_upload(fid) for fid in body.clip_ids]
 
     job_id = uuid.uuid4().hex
     out_dir = TEMP_DIR / "results" / job_id
     out_dir.mkdir(parents=True)
 
-    from generators.studio_render import render_clips
-    transitions_dicts = [{"type": t.type, "duration": t.duration} for t in body.transitions]
-    audio_path = _find_upload(body.audio_id) if body.audio_id else None
-    result_path = await asyncio.to_thread(
-        render_clips, clip_paths, transitions_dicts, out_dir, body.clip_durations,
-        audio_path, body.audio_offset,
-    )
-    asyncio.create_task(_cleanup_later(job_id, out_dir))
-    return FileResponse(str(result_path), media_type="video/mp4", filename="studio_result.mp4")
+    job_store[job_id] = {
+        "status": "queued",
+        "progress": 0.0,
+        "result_path": None,
+        "error": None,
+        "created_at": time.time(),
+    }
+
+    async def _run():
+        job_store[job_id]["status"] = "running"
+        job_store[job_id]["progress"] = 0.1
+        try:
+            clip_paths = [_find_upload(fid) for fid in body.clip_ids]
+            audio_path = _find_upload(body.audio_id) if body.audio_id else None
+            from generators.studio_render import render_clips
+            transitions_dicts = [{"type": t.type, "duration": t.duration} for t in body.transitions]
+            result_path = await asyncio.to_thread(
+                render_clips, clip_paths, transitions_dicts, out_dir,
+                body.clip_durations, audio_path, body.audio_offset,
+            )
+            job_store[job_id].update({
+                "status": "done",
+                "progress": 1.0,
+                "result_path": str(result_path),
+            })
+        except Exception as e:
+            job_store[job_id].update({"status": "error", "error": str(e), "progress": 0.0})
+            print(f"[ERROR] Studio job {job_id}: {e}")
+        asyncio.create_task(_cleanup_later(job_id, out_dir))
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id}
 
 
 @app.get("/api/status/{job_id}")

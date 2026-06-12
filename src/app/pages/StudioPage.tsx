@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { Download, Film, Trash2, GripVertical, Play, Image, Music } from "lucide-react";
-import { apiUpload, apiStudioRender } from "../../api/client";
+import { apiUpload, apiStudioRender, apiStatus, resultUrl as getResultUrl } from "../../api/client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -482,20 +482,33 @@ export function StudioPage() {
       const ids: string[] = [];
       const totalFiles = clips.length + (audioTrack ? 1 : 0);
       for (let i = 0; i < clips.length; i++) {
-        setRenderPct((i / totalFiles) * 0.5);
+        setRenderPct((i / totalFiles) * 0.45);
         ids.push(await apiUpload(clips[i].file));
       }
 
       let audioId: string | undefined;
       if (audioTrack) {
-        setRenderPct((clips.length / totalFiles) * 0.5);
+        setRenderPct((clips.length / totalFiles) * 0.45);
         audioId = await apiUpload(audioTrack.file);
       }
 
-      setRenderStatus("rendering"); setRenderPct(0.55);
+      setRenderStatus("rendering"); setRenderPct(0.5);
       const clip_durations = clips.map((c) => c.isImage ? c.duration : 0);
-      const url = await apiStudioRender(ids, gaps, clip_durations, audioId, audioTrack?.offset ?? 0);
-      setResultUrl(url); setRenderStatus("done"); setRenderPct(1);
+      const jobId = await apiStudioRender(ids, gaps, clip_durations, audioId, audioTrack?.offset ?? 0);
+
+      // Poll until done (same pattern as other pages)
+      await new Promise<void>((resolve, reject) => {
+        const iv = setInterval(async () => {
+          try {
+            const s = await apiStatus(jobId);
+            setRenderPct(0.5 + s.progress * 0.5);
+            if (s.status === "done") { clearInterval(iv); resolve(); }
+            else if (s.status === "error") { clearInterval(iv); reject(new Error(s.error ?? "Render failed")); }
+          } catch (e) { clearInterval(iv); reject(e); }
+        }, 2000);
+      });
+
+      setResultUrl(getResultUrl(jobId)); setRenderStatus("done"); setRenderPct(1);
     } catch (err: unknown) {
       setError((err as Error)?.message ?? "Render failed"); setRenderStatus("error");
     }
@@ -650,7 +663,7 @@ export function StudioPage() {
                         <p style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.52rem", color: "#00f5ff", letterSpacing: "0.1em" }}>RENDER COMPLETE</p>
                       </div>
                     </div>
-                    <motion.a href={resultUrl!} download="studio_result.mp4" className="flex items-center justify-center gap-2 px-5 py-3 relative overflow-hidden no-underline"
+                    <motion.a href={resultUrl!} target="_blank" rel="noopener noreferrer" download="studio_result.mp4" className="flex items-center justify-center gap-2 px-5 py-3 relative overflow-hidden no-underline"
                       style={{ fontFamily: "Orbitron, sans-serif", fontSize: "0.62rem", letterSpacing: "0.14em", color: "#0a0a0f", background: "linear-gradient(135deg, #00f5ff, #7000ff)", boxShadow: "0 0 28px rgba(0,245,255,0.35)" }}
                       whileHover={{ scale: 1.03, boxShadow: "0 0 48px rgba(0,245,255,0.55)" } as any} whileTap={{ scale: 0.97 } as any}>
                       <Download size={13} /> DOWNLOAD MP4
