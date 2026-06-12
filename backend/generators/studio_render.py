@@ -55,14 +55,10 @@ def _duration(info: dict) -> float:
 
 
 def _image_to_clip(src: Path, duration: float, dst: Path) -> None:
-    """Convert a still image to an MP4 clip with Ken Burns zoom effect."""
-    frames = max(1, int(duration * 30))
+    """Convert a still image to a static MP4 clip."""
     vf = (
-        f"scale=1280:720:force_original_aspect_ratio=decrease,"
-        f"pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-        f"zoompan=z='min(zoom+0.0015\\,1.3)':d={frames}"
-        f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720,"
-        f"setsar=1"
+        "scale=1280:720:force_original_aspect_ratio=decrease,"
+        "pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1"
     )
     cmd = [
         FFMPEG, "-y",
@@ -107,11 +103,39 @@ def _normalize(src: Path, dst: Path, image_duration: float = 3.0) -> None:
     subprocess.run(cmd, check=True, capture_output=True, timeout=300)
 
 
+def _apply_audio(video: Path, audio_path: Path | None, offset: float, out_dir: Path) -> Path:
+    """Mix audio track into video if provided; otherwise return video unchanged."""
+    if not audio_path or not audio_path.exists():
+        return video
+    mixed = out_dir / "studio_result_mixed.mp4"
+    _mix_audio(video, audio_path, offset, mixed)
+    return mixed
+
+
+def _mix_audio(video: Path, audio_src: Path, offset: float, out: Path) -> None:
+    delay_ms = max(0, int(offset * 1000))
+    cmd = [
+        FFMPEG, "-y",
+        "-i", str(video),
+        "-i", str(audio_src),
+        "-filter_complex",
+        f"[1:a]adelay={delay_ms}|{delay_ms}[aud];[0:a][aud]amix=inputs=2:duration=first:dropout_transition=2[outa]",
+        "-map", "0:v",
+        "-map", "[outa]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2",
+        str(out),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+
+
 def render_clips(
     clip_paths: list[Path],
     transitions: list[dict],
     out_dir: Path,
     clip_durations: list[float] | None = None,
+    audio_path: Path | None = None,
+    audio_offset: float = 0.0,
 ) -> Path:
     """Concatenate clips with per-gap transitions.
 
@@ -137,7 +161,7 @@ def render_clips(
 
     if n == 1:
         shutil.copy(normalized[0], out)
-        return out
+        return _apply_audio(out, audio_path, audio_offset, out_dir)
 
     # Decide render path
     def _trans(i: int) -> dict:
@@ -156,7 +180,7 @@ def render_clips(
             "-movflags", "+faststart",
             "-c:a", "aac", str(out),
         ], check=True, capture_output=True, timeout=600)
-        return out
+        return _apply_audio(out, audio_path, audio_offset, out_dir)
 
     # xfade chain for any non-cut transition
     durations = [_duration(_probe(p)) for p in normalized]
@@ -204,4 +228,4 @@ def render_clips(
         "-c:a", "aac", str(out),
     ]
     subprocess.run(cmd, check=True, capture_output=True, timeout=600)
-    return out
+    return _apply_audio(out, audio_path, audio_offset, out_dir)

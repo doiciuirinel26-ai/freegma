@@ -56,6 +56,8 @@ class StudioRenderRequest(BaseModel):
     clip_ids: list[str]
     transitions: list[TransitionSettings] = []
     clip_durations: list[float] = []
+    audio_id: Optional[str] = None
+    audio_offset: float = 0.0
 
 
 class GenerateRequest(BaseModel):
@@ -157,8 +159,10 @@ async def studio_render(
 
     from generators.studio_render import render_clips
     transitions_dicts = [{"type": t.type, "duration": t.duration} for t in body.transitions]
+    audio_path = _find_upload(body.audio_id) if body.audio_id else None
     result_path = await asyncio.to_thread(
-        render_clips, clip_paths, transitions_dicts, out_dir, body.clip_durations
+        render_clips, clip_paths, transitions_dicts, out_dir, body.clip_durations,
+        audio_path, body.audio_offset,
     )
     asyncio.create_task(_cleanup_later(job_id, out_dir))
     return FileResponse(str(result_path), media_type="video/mp4", filename="studio_result.mp4")

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { Download, Film, Trash2, GripVertical, Play, Image } from "lucide-react";
+import { Download, Film, Trash2, GripVertical, Play, Image, Music } from "lucide-react";
 import { apiUpload, apiStudioRender } from "../../api/client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -19,8 +19,17 @@ interface Clip {
   name: string;
   url: string;
   thumbnail: string;
-  duration: number;   // video: actual duration; image: display duration (seconds)
+  duration: number;
   isImage: boolean;
+}
+
+interface AudioTrack {
+  id: string;
+  file: File;
+  name: string;
+  url: string;
+  duration: number;
+  offset: number; // seconds from video start
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -29,6 +38,8 @@ const isImageFile = (f: File) =>
   f.type.startsWith("image/") || /\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name);
 const isVideoFile = (f: File) =>
   f.type.startsWith("video/") || /\.(mp4|mov|avi|webm|mkv)$/i.test(f.name);
+const isAudioFile = (f: File) =>
+  f.type.startsWith("audio/") || /\.(mp3|wav|aac|ogg|flac|m4a)$/i.test(f.name);
 
 async function extractVideoMeta(file: File): Promise<{ thumbnail: string; duration: number }> {
   return new Promise((resolve) => {
@@ -77,6 +88,16 @@ async function extractMeta(file: File): Promise<{ thumbnail: string; duration: n
   }
   const m = await extractVideoMeta(file);
   return { ...m, isImage: false };
+}
+
+async function extractAudioMeta(file: File): Promise<{ duration: number }> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const el = document.createElement("audio");
+    el.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve({ duration: isFinite(el.duration) ? el.duration : 0 }); };
+    el.onerror = () => { URL.revokeObjectURL(url); resolve({ duration: 0 }); };
+    el.src = url;
+  });
 }
 
 // ── Transition catalogue ───────────────────────────────────────────────────────
@@ -209,22 +230,18 @@ function ClipCard({ clip, index, isActive, onSelect, onDelete, onDurationChange,
       draggable onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onClick={onSelect}
       whileHover={{ scale: 1.03 } as any}>
 
-      {/* Thumbnail */}
       <div style={{ width: 124, height: 70, background: "#000", overflow: "hidden", position: "relative" }}>
         {clip.thumbnail
           ? <img src={clip.thumbnail} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
           : <div className="flex items-center justify-center w-full h-full">{clip.isImage ? <Image size={22} style={{ color: "rgba(0,245,255,0.25)" }} /> : <Film size={22} style={{ color: "rgba(0,245,255,0.25)" }} />}</div>}
-        {/* type badge */}
         <div style={{ position: "absolute", top: 3, left: 3, fontFamily: "Share Tech Mono, monospace", fontSize: "0.38rem", color: clip.isImage ? "#00e5b0" : "#00f5ff", background: "rgba(0,0,0,0.7)", padding: "1px 4px", letterSpacing: "0.06em" }}>
           {clip.isImage ? "IMG" : "VID"} {index + 1}
         </div>
-        {/* duration badge */}
         <div style={{ position: "absolute", bottom: 3, right: 3, fontFamily: "Share Tech Mono, monospace", fontSize: "0.42rem", color: "#00f5ff", background: "rgba(0,0,0,0.75)", padding: "1px 3px" }}>
           {clip.isImage ? `${clip.duration.toFixed(1)}s` : fmt(clip.duration)}
         </div>
       </div>
 
-      {/* Name + delete row */}
       <div className="flex items-center justify-between px-1.5 py-0.5">
         <div style={{ color: "rgba(0,245,255,0.35)", lineHeight: 0, cursor: "grab" }} onMouseDown={(e) => e.stopPropagation()}><GripVertical size={11} /></div>
         <p style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.4rem", color: "#7ab8d0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 64 }}>{clip.name.replace(/\.[^.]+$/, "")}</p>
@@ -236,7 +253,6 @@ function ClipCard({ clip, index, isActive, onSelect, onDelete, onDurationChange,
         </button>
       </div>
 
-      {/* Image duration controls */}
       {clip.isImage && (
         <div className="flex items-center justify-between px-1.5 py-1" style={{ borderTop: "1px solid rgba(0,229,176,0.15)", background: "rgba(0,229,176,0.04)" }} onClick={(e) => e.stopPropagation()}>
           <span style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.42rem", color: "rgba(0,229,176,0.6)", letterSpacing: "0.06em" }}>HOLD</span>
@@ -253,11 +269,114 @@ function ClipCard({ clip, index, isActive, onSelect, onDelete, onDurationChange,
   );
 }
 
+// ── AudioTrackRow ─────────────────────────────────────────────────────────────
+
+function AudioTrackRow({ track, totalDuration, onChange, onDelete }: {
+  track: AudioTrack;
+  totalDuration: number;
+  onChange: (t: AudioTrack) => void;
+  onDelete: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(600);
+  const dragging = useRef<{ startX: number; startOffset: number } | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(([e]) => setContainerW(e.contentRect.width));
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const safeTotal = totalDuration > 0.1 ? totalDuration : 10;
+  const pxPerSec = containerW / safeTotal;
+  const blockW = Math.max(40, Math.min(track.duration * pxPerSec, containerW));
+  const blockLeft = Math.min(track.offset * pxPerSec, containerW - blockW);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = { startX: e.clientX, startOffset: track.offset };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const dSec = (ev.clientX - dragging.current.startX) / pxPerSec;
+      const newOffset = Math.max(0, dragging.current.startOffset + dSec);
+      onChange({ ...track, offset: parseFloat(newOffset.toFixed(2)) });
+    };
+    const onUp = () => {
+      dragging.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const fmt = (s: number) => isFinite(s) && s > 0 ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "--:--";
+
+  return (
+    <div style={{ display: "flex", alignItems: "stretch", height: 38, marginTop: 6 }}>
+      {/* Label column — matches timeline left gutter */}
+      <div style={{ width: 52, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(160,96,255,0.08)", border: "1px solid rgba(160,96,255,0.2)", borderRight: "none" }}>
+        <Music size={11} style={{ color: "#a060ff" }} />
+      </div>
+
+      {/* Draggable track area */}
+      <div ref={containerRef} style={{ flex: 1, position: "relative", background: "rgba(112,0,255,0.04)", border: "1px solid rgba(160,96,255,0.18)", overflow: "hidden" }}>
+        {/* Subtle grid lines */}
+        <div style={{ position: "absolute", inset: 0, backgroundImage: "repeating-linear-gradient(90deg, rgba(160,96,255,0.05) 0px, rgba(160,96,255,0.05) 1px, transparent 1px, transparent 60px)", pointerEvents: "none" }} />
+
+        {/* Audio block */}
+        <motion.div
+          onMouseDown={onMouseDown}
+          style={{
+            position: "absolute",
+            left: blockLeft,
+            width: blockW,
+            top: 4, bottom: 4,
+            background: "rgba(112,0,255,0.28)",
+            border: "1px solid rgba(160,96,255,0.65)",
+            borderRadius: 3,
+            cursor: "grab",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "0 6px",
+            userSelect: "none",
+          }}
+          whileHover={{ background: "rgba(112,0,255,0.38)" } as any}>
+          <GripVertical size={9} style={{ color: "rgba(160,96,255,0.7)", flexShrink: 0 }} />
+          <Music size={9} style={{ color: "#c090ff", flexShrink: 0 }} />
+          <span style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.4rem", color: "#c090ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+            {track.name.replace(/\.[^.]+$/, "")}
+          </span>
+          <span style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.38rem", color: "rgba(192,144,255,0.55)", flexShrink: 0 }}>
+            {fmt(track.duration)}
+          </span>
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={onDelete}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,68,68,0.4)", padding: 0, flexShrink: 0, lineHeight: 0 }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,68,68,1)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,68,68,0.4)"; }}>
+            <Trash2 size={9} />
+          </button>
+        </motion.div>
+      </div>
+
+      {/* Offset display */}
+      <div style={{ width: 52, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(112,0,255,0.06)", border: "1px solid rgba(160,96,255,0.18)", borderLeft: "none" }}>
+        <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: "0.42rem", color: "#a060ff" }}>+{track.offset.toFixed(1)}s</span>
+      </div>
+    </div>
+  );
+}
+
 // ── StudioPage ────────────────────────────────────────────────────────────────
 
 export function StudioPage() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [gaps, setGaps] = useState<GapSettings[]>([]);
+  const [audioTrack, setAudioTrack] = useState<AudioTrack | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [seqMode, setSeqMode] = useState(false);
   const [seqIdx, setSeqIdx] = useState(0);
@@ -271,11 +390,16 @@ export function StudioPage() {
   const dragIdx = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const audioFileRef = useRef<HTMLInputElement>(null);
 
   const activeClip = clips.find((c) => c.id === activeId) ?? null;
   const isRendering = renderStatus === "uploading" || renderStatus === "rendering";
   const previewSrc = seqMode ? (clips[seqIdx]?.url ?? null) : (activeClip?.url ?? null);
   const previewIsImage = seqMode ? (clips[seqIdx]?.isImage ?? false) : (activeClip?.isImage ?? false);
+
+  // Total video duration accounting for transition overlaps
+  const totalDuration = clips.reduce((sum, c) => sum + c.duration, 0)
+    - gaps.reduce((sum, g, i) => sum + (i < clips.length - 1 && g.type !== "cut" ? g.duration : 0), 0);
 
   useEffect(() => {
     if (!seqMode) return;
@@ -311,6 +435,21 @@ export function StudioPage() {
     if (!activeId && newClips[0]) setActiveId(newClips[0].id);
   }, [activeId]);
 
+  const addAudio = useCallback(async (files: FileList | File[]) => {
+    const file = Array.from(files).find(isAudioFile);
+    if (!file) return;
+    const { duration } = await extractAudioMeta(file);
+    if (audioTrack) URL.revokeObjectURL(audioTrack.url);
+    setAudioTrack({
+      id: Math.random().toString(36).slice(2),
+      file,
+      name: file.name,
+      url: URL.createObjectURL(file),
+      duration,
+      offset: 0,
+    });
+  }, [audioTrack]);
+
   const deleteClip = (id: string) => {
     setClips((prev) => {
       const idx = prev.findIndex((c) => c.id === id);
@@ -341,13 +480,21 @@ export function StudioPage() {
     setRenderStatus("uploading"); setError(null); setResultUrl(null);
     try {
       const ids: string[] = [];
+      const totalFiles = clips.length + (audioTrack ? 1 : 0);
       for (let i = 0; i < clips.length; i++) {
-        setRenderPct((i / clips.length) * 0.5);
+        setRenderPct((i / totalFiles) * 0.5);
         ids.push(await apiUpload(clips[i].file));
       }
+
+      let audioId: string | undefined;
+      if (audioTrack) {
+        setRenderPct((clips.length / totalFiles) * 0.5);
+        audioId = await apiUpload(audioTrack.file);
+      }
+
       setRenderStatus("rendering"); setRenderPct(0.55);
       const clip_durations = clips.map((c) => c.isImage ? c.duration : 0);
-      const url = await apiStudioRender(ids, gaps, clip_durations);
+      const url = await apiStudioRender(ids, gaps, clip_durations, audioId, audioTrack?.offset ?? 0);
       setResultUrl(url); setRenderStatus("done"); setRenderPct(1);
     } catch (err: unknown) {
       setError((err as Error)?.message ?? "Render failed"); setRenderStatus("error");
@@ -356,8 +503,9 @@ export function StudioPage() {
 
   const handleReset = () => {
     clips.forEach((c) => URL.revokeObjectURL(c.url));
+    if (audioTrack) URL.revokeObjectURL(audioTrack.url);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
-    setClips([]); setGaps([]); setActiveId(null); setResultUrl(null);
+    setClips([]); setGaps([]); setAudioTrack(null); setActiveId(null); setResultUrl(null);
     setRenderStatus("idle"); setError(null); setRenderPct(0); setSeqMode(false); setSeqIdx(0);
   };
 
@@ -370,12 +518,12 @@ export function StudioPage() {
           <h1 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.4rem", color: "#00f5ff", letterSpacing: "0.12em" }}>STUDIO</h1>
         </div>
         <p style={{ fontFamily: "Rajdhani, sans-serif", fontSize: "0.9rem", color: "#7ab8d0" }}>
-          Combine video clips &amp; images — reorder, set transitions, render final MP4
+          Combine video clips &amp; images — reorder, set transitions, add audio, render final MP4
         </p>
       </div>
 
       {/* Upload zone */}
-      <motion.div className="mb-6 flex items-center justify-center"
+      <motion.div className="mb-4 flex items-center justify-center"
         style={{ border: `1px dashed ${dropActive ? "rgba(0,245,255,0.75)" : "rgba(0,245,255,0.22)"}`, background: dropActive ? "rgba(0,245,255,0.05)" : "rgba(0,8,18,0.55)", padding: clips.length ? "14px 0" : "52px 0", cursor: "pointer", transition: "all 0.18s" }}
         onDragOver={(e) => { e.preventDefault(); setDropActive(true); }}
         onDragLeave={() => setDropActive(false)}
@@ -411,10 +559,24 @@ export function StudioPage() {
         <>
           {/* Timeline */}
           <div className="mb-6">
-            <p style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.48rem", color: "rgba(0,245,255,0.45)", letterSpacing: "0.15em", marginBottom: 10 }}>
-              TIMELINE — {clips.length} ITEM{clips.length > 1 ? "S" : ""} · drag to reorder · click transition to edit
-            </p>
-            <div className="flex items-center overflow-x-auto pb-3" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(0,245,255,0.18) transparent" }}>
+            <div className="flex items-center justify-between mb-2">
+              <p style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.48rem", color: "rgba(0,245,255,0.45)", letterSpacing: "0.15em" }}>
+                TIMELINE — {clips.length} ITEM{clips.length > 1 ? "S" : ""} · {totalDuration.toFixed(1)}s · drag to reorder
+              </p>
+              {/* Add audio button */}
+              <button
+                onClick={() => audioFileRef.current?.click()}
+                style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.48rem", color: audioTrack ? "#a060ff" : "rgba(160,96,255,0.6)", border: `1px solid ${audioTrack ? "rgba(160,96,255,0.5)" : "rgba(160,96,255,0.25)"}`, background: audioTrack ? "rgba(112,0,255,0.12)" : "transparent", padding: "4px 10px", cursor: "pointer", letterSpacing: "0.1em", display: "flex", alignItems: "center", gap: 5, transition: "all 0.15s" }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(160,96,255,0.6)"; (e.currentTarget as HTMLButtonElement).style.color = "#c090ff"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = audioTrack ? "rgba(160,96,255,0.5)" : "rgba(160,96,255,0.25)"; (e.currentTarget as HTMLButtonElement).style.color = audioTrack ? "#a060ff" : "rgba(160,96,255,0.6)"; }}>
+                <Music size={10} />
+                {audioTrack ? audioTrack.name.replace(/\.[^.]+$/, "").slice(0, 14) : "+ ADD AUDIO"}
+              </button>
+              <input ref={audioFileRef} type="file" accept="audio/*,.mp3,.wav,.aac,.ogg,.flac,.m4a" style={{ display: "none" }} onChange={(e) => e.target.files && addAudio(e.target.files)} />
+            </div>
+
+            {/* Clips row */}
+            <div className="flex items-center overflow-x-auto pb-2" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(0,245,255,0.18) transparent" }}>
               {clips.map((clip, i) => (
                 <div key={clip.id} className="flex items-center flex-shrink-0">
                   <ClipCard clip={clip} index={i}
@@ -432,6 +594,23 @@ export function StudioPage() {
                 </div>
               ))}
             </div>
+
+            {/* Audio track row */}
+            <AnimatePresence>
+              {audioTrack && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }}>
+                  <AudioTrackRow
+                    track={audioTrack}
+                    totalDuration={Math.max(totalDuration, 1)}
+                    onChange={setAudioTrack}
+                    onDelete={() => { URL.revokeObjectURL(audioTrack.url); setAudioTrack(null); }}
+                  />
+                  <p style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.42rem", color: "rgba(160,96,255,0.45)", marginTop: 4, letterSpacing: "0.08em" }}>
+                    drag audio block to set start position · offset: {audioTrack.offset.toFixed(1)}s
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Preview + controls */}
@@ -492,7 +671,6 @@ export function StudioPage() {
                     <div className="h-1" style={{ background: "rgba(0,245,255,0.08)" }}>
                       <motion.div className="h-full" style={{ background: "linear-gradient(90deg, #00f5ff, #7000ff)", boxShadow: "0 0 8px #00f5ff60" }} animate={{ width: `${Math.round(renderPct * 100)}%` }} transition={{ duration: 0.3 }} />
                     </div>
-                    <p style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.44rem", color: "rgba(0,245,255,0.4)", marginTop: 6 }}>Images → Ken Burns effect · may take a few minutes</p>
                   </motion.div>
                 ) : (
                   <motion.div key="idle" className="flex flex-col gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>

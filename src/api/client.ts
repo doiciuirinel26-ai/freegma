@@ -48,11 +48,13 @@ export async function apiStudioRender(
   clip_ids: string[],
   transitions: { type: string; duration: number }[],
   clip_durations: number[],
+  audio_id?: string,
+  audio_offset?: number,
 ): Promise<string> {
   const r = await fetch(`${BACKEND}/api/studio/render${qs()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clip_ids, transitions, clip_durations }),
+    body: JSON.stringify({ clip_ids, transitions, clip_durations, audio_id, audio_offset: audio_offset ?? 0 }),
   });
   if (!r.ok) throw new Error(await r.text());
   const blob = await r.blob();
