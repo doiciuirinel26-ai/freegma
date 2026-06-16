@@ -9,6 +9,7 @@ type AuthContextType = {
   hasAdsAccess: boolean;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<string | null>;
+  signInWithFigma: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -57,6 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return error?.message ?? null;
   }
 
+  async function signInWithFigma() {
+    await supabase.auth.signInWithOAuth({
+      provider: "figma",
+      options: { redirectTo: window.location.origin },
+    });
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
   }
@@ -64,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasAdsAccess = subscription?.plan === "ads_pro" && subscription?.status === "active";
 
   return (
-    <AuthContext.Provider value={{ user, loading, subscription, hasAdsAccess, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, subscription, hasAdsAccess, signIn, signUp, signInWithFigma, signOut }}>
       {children}
     </AuthContext.Provider>
   );

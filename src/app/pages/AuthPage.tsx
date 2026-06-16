@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../../contexts/AuthContext";
 
 export function AuthPage() {
-  const { signIn, signUp, user, loading: authLoading } = useAuth();
+  const { signIn, signUp, signInWithFigma, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as any)?.from ?? "/text-to-image";
@@ -296,6 +296,40 @@ export function AuthPage() {
               )}
             </motion.button>
           </form>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mt-5">
+            <div className="flex-1 h-px" style={{ background: "rgba(0,245,255,0.1)" }} />
+            <span style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.55rem", color: "#7ab8d0", letterSpacing: "0.15em" }}>OR</span>
+            <div className="flex-1 h-px" style={{ background: "rgba(0,245,255,0.1)" }} />
+          </div>
+
+          {/* Figma OAuth */}
+          <button
+            onClick={signInWithFigma}
+            className="w-full py-2.5 mt-3 flex items-center justify-center gap-2"
+            style={{
+              background: "rgba(26,26,40,0.8)",
+              border: "1px solid rgba(0,245,255,0.15)",
+              cursor: "pointer",
+              transition: "border-color 0.2s",
+              fontFamily: "Orbitron, sans-serif",
+              fontSize: "0.58rem",
+              letterSpacing: "0.15em",
+              color: "#e0f7ff",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(0,245,255,0.4)")}
+            onMouseLeave={e => (e.currentTarget.style.borderColor = "rgba(0,245,255,0.15)")}
+          >
+            <svg width="16" height="16" viewBox="0 0 38 57" fill="none">
+              <path d="M19 28.5A9.5 9.5 0 1 1 28.5 19 9.5 9.5 0 0 1 19 28.5z" fill="#1ABCFE"/>
+              <path d="M0 47.5A9.5 9.5 0 0 1 9.5 38H19v9.5A9.5 9.5 0 0 1 0 47.5z" fill="#0ACF83"/>
+              <path d="M19 0v19h9.5a9.5 9.5 0 0 0 0-19z" fill="#FF7262"/>
+              <path d="M0 9.5A9.5 9.5 0 0 0 9.5 19H19V0H9.5A9.5 9.5 0 0 0 0 9.5z" fill="#F24E1E"/>
+              <path d="M0 28.5A9.5 9.5 0 0 0 9.5 38H19V19H9.5A9.5 9.5 0 0 0 0 28.5z" fill="#A259FF"/>
+            </svg>
+            CONTINUE WITH FIGMA
+          </button>
 
           <p className="text-center mt-5" style={{ fontFamily: "Share Tech Mono, monospace", fontSize: "0.6rem", color: "#7ab8d0", opacity: 0.6, letterSpacing: "0.08em" }}>
             {mode === "login" ? "No account?" : "Already have an account?"}{" "}
