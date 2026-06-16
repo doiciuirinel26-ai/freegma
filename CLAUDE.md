@@ -17,9 +17,9 @@
 
 ## ⚠️ REGULI CRITICE — NU ÎNCĂLCA
 
-1. **NU modifica `VITE_BACKEND_URL`** — nici în Vercel dashboard, nici în `vercel.json`, nici în `.env.local`. URL-ul backend-ului este `https://api.freegma.win` și este configurat corect.
-2. **NU umbla la configurația Cloudflare tunnel** — rulează ca Windows service cu token hardcodat, nu necesită intervenție.
-3. **NU adăuga `build.env` în `vercel.json`** — env vars sunt în Vercel dashboard și au prioritate; `build.env` în vercel.json le suprascrie și strică totul.
+1. **Întreabă înainte să modifici `VITE_BACKEND_URL`** — nici în Vercel dashboard, nici în `vercel.json`, nici în `.env.local`. URL-ul curent este `https://api.freegma.win`. Dacă pare greșit, întreabă userul înainte să schimbi.
+2. **Întreabă înainte să umbli la configurația Cloudflare tunnel** — rulează ca Windows service cu token fix, userul știe ce face.
+3. **NU adăuga `build.env` în `vercel.json`** — env vars sunt în Vercel dashboard; `build.env` în vercel.json le suprascrie și strică totul.
 4. **NU face `git push` sau operații destructive** fără confirmare explicită.
 
 ---

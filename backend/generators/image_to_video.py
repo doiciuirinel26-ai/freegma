@@ -18,6 +18,67 @@ DEFAULT_NEG = (
     "jpeg artifacts, grainy, noisy, flickering"
 )
 
+WAN_NEG_SUFFIX = (
+    "distorted, morphing, geometric artifacts, abstract, glitch, "
+    "warping limbs, melting faces, frame duplication, stuttering"
+)
+
+# Mapping: action keywords → motion description expansion
+_ACTION_MAP = [
+    ("running",    "running forward, legs moving rhythmically, arms swinging naturally, smooth fluid motion, camera follows subject"),
+    ("walking",    "walking forward, steady gait, natural arm swing, smooth fluid motion"),
+    ("jumping",    "jumping upward, legs pushing off ground, body arcing through air, landing smoothly"),
+    ("dancing",    "dancing with rhythmic body movement, fluid choreography, expressive motion"),
+    ("flying",     "flying through the air, wings or arms extended, smooth gliding motion, dynamic camera"),
+    ("swimming",   "swimming through water, arms and legs stroking rhythmically, rippling water"),
+    ("driving",    "driving forward, vehicle moving smoothly, scenery passing in background"),
+    ("falling",    "falling downward, body in freefall, clothing and hair flowing upward"),
+    ("spinning",   "spinning in place, rotational motion, blur on edges, centrifugal effect"),
+    ("waving",     "waving hand smoothly, arm motion fluid, fingers extended"),
+    ("talking",    "talking with natural facial expressions, lips moving, subtle head movement"),
+    ("laughing",   "laughing with natural expression, shoulders moving, face animated"),
+    ("fighting",   "fighting with fast dynamic strikes, weight shifting, reactive movement"),
+    ("exploding",  "explosion bursting outward, debris flying, shockwave rippling through environment"),
+    ("eating",     "eating with natural hand-to-mouth motion, chewing, subtle head movement"),
+    ("writing",    "writing with hand moving across surface, smooth pen strokes"),
+    ("breathing",  "gentle breathing, chest rising and falling rhythmically"),
+]
+
+_QUALITY_SUFFIX = "cinematic, smooth motion, realistic, high quality, 24fps"
+
+
+def _enhance_prompt(prompt: str) -> str:
+    """Expand simple action prompts into WAN-optimized motion descriptions."""
+    if not prompt.strip():
+        return f"cinematic motion, smooth video, {_QUALITY_SUFFIX}"
+
+    enhanced = prompt.strip()
+    prompt_lower = enhanced.lower()
+
+    for keyword, expansion in _ACTION_MAP:
+        if keyword in prompt_lower:
+            # Replace the bare keyword with the full expansion, preserving surrounding context
+            import re
+            enhanced = re.sub(
+                rf"\b{re.escape(keyword)}\b",
+                expansion,
+                enhanced,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            break  # one expansion is enough to avoid over-stuffing
+
+    # Append quality suffix if not already present
+    if "cinematic" not in enhanced.lower():
+        enhanced = f"{enhanced}, {_QUALITY_SUFFIX}"
+    else:
+        # Still append remaining quality terms
+        for term in ["smooth motion", "high quality", "24fps"]:
+            if term not in enhanced.lower():
+                enhanced += f", {term}"
+
+    return enhanced
+
 
 def _upload_to_comfyui(image_path: Path) -> str:
     mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
@@ -34,10 +95,11 @@ def _upload_to_comfyui(image_path: Path) -> str:
 def _build_workflow(image_filename: str, prompt: str, neg: str, seed: int) -> dict:
     if seed < 0:
         seed = random.randint(0, 2**32 - 1)
-    if not neg.strip():
-        neg = DEFAULT_NEG
 
-    pos_text = (prompt.strip() or "cinematic motion, smooth video") + ", high quality, realistic"
+    pos_text = _enhance_prompt(prompt)
+
+    base_neg = neg.strip() if neg.strip() else DEFAULT_NEG
+    neg_text = f"{base_neg}, {WAN_NEG_SUFFIX}"
 
     return {
         # 1. Load diffusion model
@@ -74,7 +136,7 @@ def _build_workflow(image_filename: str, prompt: str, neg: str, seed: int) -> di
         # 7. Negative prompt
         "7": {"class_type": "CLIPTextEncode", "inputs": {
             "clip": ["4", 0],
-            "text": neg,
+            "text": neg_text,
         }},
         # 8. Load reference image
         "8": {"class_type": "LoadImage", "inputs": {

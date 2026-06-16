@@ -1,4 +1,4 @@
-"""Image-to-3D via TripoSR or InstantMesh (subprocess with isolated venvs)."""
+"""Image-to-3D via InstantMesh or Hunyuan3D (subprocess with isolated venvs)."""
 
 import subprocess
 from pathlib import Path
@@ -25,7 +25,7 @@ RUNNERS = {
 }
 
 
-def generate_3d(input_path: Path, model: str, out_dir: Path, update=None) -> Path:
+def generate_3d(input_paths: list, model: str, out_dir: Path, update=None) -> Path:
     runner = RUNNERS.get(model) or RUNNERS["triposr"]
     py     = runner["python"]
     script = runner["script"]
@@ -37,8 +37,15 @@ def generate_3d(input_path: Path, model: str, out_dir: Path, update=None) -> Pat
 
     if update: update(0.05)
 
+    if model == "hunyuan3d":
+        # New CLI: <out_dir> <img1> [img2] [img3] [img4]
+        cmd = [str(py), str(script), str(out_dir)] + [str(p) for p in input_paths]
+    else:
+        # Other models: single image only — <img1> <out_dir>
+        cmd = [str(py), str(script), str(input_paths[0]), str(out_dir)]
+
     proc = subprocess.Popen(
-        [str(py), str(script), str(input_path), str(out_dir)],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

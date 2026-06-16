@@ -61,7 +61,7 @@ class StudioRenderRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    mode: str              # "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync" | "video-pipeline"
+    mode: str              # "text-to-image" | "image-to-3d" | "image-to-video" | "lip-sync" | "video-pipeline" | "upscale"
     prompt: str = ""
     neg_prompt: str = ""
     model: str = "sdxl"
@@ -256,9 +256,11 @@ async def worker():
                     out_dir, update
                 )
             elif req.mode == "image-to-3d":
-                input_path = _find_upload(req.file_id)
+                input_paths = [_find_upload(req.file_id)]
+                for fid in (req.bg_image_ids or []):
+                    input_paths.append(_find_upload(fid))
                 result_path = await asyncio.to_thread(
-                    generate_3d, input_path, req.model, out_dir, update
+                    generate_3d, input_paths, req.model, out_dir, update
                 )
             elif req.mode == "image-to-video":
                 input_path = _find_upload(req.file_id)
@@ -280,12 +282,44 @@ async def worker():
                 bg_image_paths = [_find_upload(fid) for fid in (req.bg_image_ids or [])]
                 bg_video_paths = [_find_upload(fid) for fid in (req.bg_video_ids or [])]
                 avatar_path_vp = _find_upload(req.file_id) if req.file_id else None
+                voice_sample   = _find_upload(req.audio_file_id) if req.audio_file_id else None
                 result_path = await asyncio.to_thread(
                     generate_video_pipeline,
                     bg_image_paths, bg_video_paths, avatar_path_vp,
                     req.narration_text, req.tts_engine, req.tts_voice, req.lang,
                     req.no_zoom, req.no_subtitles, req.fixed_scene_duration,
+                    out_dir, update, voice_sample,
+                )
+            elif req.mode == "upscale":
+                from generators.upscale import upscale_image
+                input_path = _find_upload(req.file_id)
+                result_path = await asyncio.to_thread(
+                    upscale_image, input_path, req.model, out_dir, update
+                )
+            elif req.mode == "lipsync-realface":
+                from generators.lipsync_realface import generate_realface_lipsync
+                video_path = _find_upload(req.file_id)
+                voice_path = _find_upload(req.audio_file_id)
+                result_path = await asyncio.to_thread(
+                    generate_realface_lipsync,
+                    video_path, voice_path,
+                    req.tts_text, req.lang,
                     out_dir, update,
+                )
+            elif req.mode == "ads-clothing-video":
+                from generators.ads_clothing_video import generate_clothing_video
+                input_path = _find_upload(req.file_id)
+                result_path = await asyncio.to_thread(
+                    generate_clothing_video,
+                    input_path, req.prompt, req.neg_prompt, out_dir, update
+                )
+            elif req.mode == "ads-product-on-model":
+                from generators.ads_product_on_model import generate_product_on_model
+                ref_paths = [_find_upload(req.file_id)] if req.file_id else []
+                ref_paths += [_find_upload(fid) for fid in (req.bg_image_ids or [])]
+                result_path = await asyncio.to_thread(
+                    generate_product_on_model,
+                    ref_paths, req.prompt, out_dir, update
                 )
             else:
                 raise ValueError(f"Unknown mode: {req.mode}")

@@ -528,7 +528,7 @@ export function StudioPage() {
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-1.5 h-6" style={{ background: "linear-gradient(180deg, #00f5ff, #7000ff)" }} />
-          <h1 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.4rem", color: "#00f5ff", letterSpacing: "0.12em" }}>STUDIO</h1>
+          <h1 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.4rem", color: "#00f5ff", letterSpacing: "0.12em" }}>CRAFT</h1>
         </div>
         <p style={{ fontFamily: "Rajdhani, sans-serif", fontSize: "0.9rem", color: "#7ab8d0" }}>
           Combine video clips &amp; images — reorder, set transitions, add audio, render final MP4
@@ -664,8 +664,10 @@ export function StudioPage() {
                       </div>
                     </div>
                     <motion.a href={resultUrl!} target="_blank" rel="noopener noreferrer" download="studio_result.mp4" className="flex items-center justify-center gap-2 px-5 py-3 relative overflow-hidden no-underline"
-                      style={{ fontFamily: "Orbitron, sans-serif", fontSize: "0.62rem", letterSpacing: "0.14em", color: "#0a0a0f", background: "linear-gradient(135deg, #00f5ff, #7000ff)", boxShadow: "0 0 28px rgba(0,245,255,0.35)" }}
-                      whileHover={{ scale: 1.03, boxShadow: "0 0 48px rgba(0,245,255,0.55)" } as any} whileTap={{ scale: 0.97 } as any}>
+                      style={{ fontFamily: "Orbitron, sans-serif", fontSize: "0.62rem", letterSpacing: "0.14em", color: "#0a0a0f", background: "linear-gradient(135deg, #0066ff, #00f5ff)" }}
+                      animate={{ boxShadow: ["0 0 20px rgba(0,102,255,0.5)", "0 0 50px rgba(0,245,255,0.75)", "0 0 20px rgba(0,102,255,0.5)"] }}
+                      transition={{ boxShadow: { duration: 1.5, repeat: Infinity, ease: "easeInOut" } }}
+                      whileHover={{ scale: 1.03 } as any} whileTap={{ scale: 0.97 } as any}>
                       <Download size={13} /> DOWNLOAD MP4
                       <motion.div className="absolute inset-0" style={{ background: "linear-gradient(135deg, transparent, rgba(255,255,255,0.15), transparent)" }} animate={{ x: ["-100%", "200%"] }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }} />
                     </motion.a>

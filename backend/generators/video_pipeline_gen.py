@@ -80,6 +80,24 @@ def _tts_edge(text: str, voice: str, out: Path):
     asyncio.run(_run())
 
 
+def _tts_xtts(text: str, voice_sample: Path, lang: str, out: Path):
+    """Clone voice with XTTS v2 and synthesize full narration text."""
+    TTS_PYTHON = Path(r"C:\Users\Fane sefu meu\Desktop\test_voice_clone\venv\Scripts\python.exe")
+    TTS_WORKER = Path(__file__).parent.parent / "tts_worker.py"
+    r = subprocess.run(
+        [str(TTS_PYTHON), str(TTS_WORKER),
+         "--voice",  str(voice_sample),
+         "--text",   text,
+         "--output", str(out),
+         "--lang",   lang or "en"],
+        capture_output=True, text=True,
+        timeout=600,
+    )
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout)[-400:]
+        raise RuntimeError(f"XTTS voice clone failed:\n{detail}")
+
+
 def _tts_kokoro(text: str, out: Path):
     from kokoro import KPipeline
     import numpy as np
@@ -196,38 +214,60 @@ def _xfade_concat(clips: list, durations: list, out: Path):
 
 # ── Background from video clips ───────────────────────────────────────────────
 
+def _get_duration(p: Path) -> float:
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(p)],
+        capture_output=True, text=True,
+    )
+    return float(r.stdout.strip())
+
+
 def _video_background(video_paths: list, audio_dur: float, out: Path):
-    def dur(p):
+    # Step 1: normalize each clip to identical codec/fps/resolution/timestamps.
+    # WanVideo outputs may have different frame rates or non-zero start timestamps
+    # which cause the ffmpeg concat demuxer to silently drop subsequent clips.
+    norm_dir = out.parent / "_vbg_norm"
+    norm_dir.mkdir(exist_ok=True)
+    vf = (f"scale={IMAGE_W}:{IMAGE_H}:force_original_aspect_ratio=increase,"
+          f"crop={IMAGE_W}:{IMAGE_H},fps={FPS},setpts=PTS-STARTPTS,format=yuv420p")
+
+    norm_paths = []
+    for i, p in enumerate(video_paths):
+        norm = norm_dir / f"norm_{i:03d}.mp4"
         r = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(p)],
+            ["ffmpeg", "-y", "-i", str(p),
+             "-vf", vf, "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+             "-an", str(norm)],
             capture_output=True, text=True,
         )
-        return float(r.stdout.strip())
+        if r.returncode != 0:
+            raise RuntimeError(f"Video normalize [{i}]: {r.stderr[-400:]}")
+        norm_paths.append(norm)
 
-    src_durs = [dur(p) for p in video_paths]
+    # Step 2: loop through normalized clips until we cover audio_dur + 4 s.
+    norm_durs = [_get_duration(p) for p in norm_paths]
     needed = audio_dur + 4
     lines, acc, idx = [], 0.0, 0
     while acc < needed:
-        p = video_paths[idx % len(video_paths)]
-        lines.append(f"file '{p.resolve().as_posix()}'")
-        acc += src_durs[idx % len(video_paths)]
+        i = idx % len(norm_paths)
+        lines.append(f"file '{norm_paths[i].resolve().as_posix()}'")
+        acc += norm_durs[i]
         idx += 1
 
-    concat = out.parent / "_vbg.txt"
-    concat.write_text("\n".join(lines), encoding="utf-8")
+    concat_file = out.parent / "_vbg.txt"
+    concat_file.write_text("\n".join(lines), encoding="utf-8")
 
-    vf = (f"scale={IMAGE_W}:{IMAGE_H}:force_original_aspect_ratio=increase,"
-          f"crop={IMAGE_W}:{IMAGE_H},format=yuv420p")
+    # Step 3: concat and trim to needed duration.
     r = subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
-         "-vf", vf, "-t", str(audio_dur + 2),
+        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+         "-t", str(audio_dur + 2),
          "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-         "-r", str(FPS), "-an", str(out)],
+         "-r", str(FPS), "-pix_fmt", "yuv420p", "-an", str(out)],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
-        raise RuntimeError(f"Video background: {r.stderr[-400:]}")
+        raise RuntimeError(f"Video background concat: {r.stderr[-400:]}")
 
 
 # ── LatentSync via ComfyUI ────────────────────────────────────────────────────
@@ -255,7 +295,7 @@ def _run_lipsync(avatar: Path, audio: Path, out: Path) -> Path:
         "3": {"class_type": "GeekyLatentSyncNode",
               "inputs": {"images": ["1", 0], "audio": ["2", 0],
                          "seed": random.randint(0, 2**32 - 1),
-                         "lips_expression": 1.8, "inference_steps": 20, "vram_usage": "medium"}},
+                         "lips_expression": 1.8, "inference_steps": 10, "vram_usage": "low"}},
         "4": {"class_type": "VHS_VideoCombine",
               "inputs": {"images": ["3", 0], "audio": ["3", 1],
                          "frame_rate": LIPSYNC_FPS, "loop_count": 0,
@@ -271,13 +311,13 @@ def _run_lipsync(avatar: Path, audio: Path, out: Path) -> Path:
     resp.raise_for_status()
     prompt_id = resp.json()["prompt_id"]
 
-    for _ in range(300):
+    for _ in range(900):
         time.sleep(2)
         h = requests.get(f"{COMFYUI_URL}/history/{prompt_id}", timeout=10).json()
         if prompt_id in h:
             break
     else:
-        raise TimeoutError("LatentSync timeout (10 min)")
+        raise TimeoutError("LatentSync timeout (30 min)")
 
     for node_out in h[prompt_id]["outputs"].values():
         for key in ("gifs", "videos", "images"):
@@ -407,6 +447,7 @@ def generate_video_pipeline(
     fixed_scene_duration: Optional[float],
     out_dir: Path,
     update=None,
+    voice_sample_path: Optional[Path] = None,
 ) -> Path:
     if not bg_image_paths and not bg_video_paths:
         raise ValueError("Provide background images or background videos")
@@ -422,7 +463,11 @@ def generate_video_pipeline(
 
     # 2 — Generate TTS audio
     audio_path = out_dir / "narration.wav"
-    if tts_engine == "kokoro":
+    if tts_engine == "xtts":
+        if not voice_sample_path:
+            raise ValueError("Voice sample is required for XTTS voice cloning")
+        _tts_xtts(full_text, voice_sample_path, lang or "en", audio_path)
+    elif tts_engine == "kokoro":
         try:
             _tts_kokoro(full_text, audio_path)
         except Exception:

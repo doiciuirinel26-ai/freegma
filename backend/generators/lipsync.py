@@ -1,9 +1,11 @@
 """Lip Sync via ComfyUI GeekyLatentSyncNode + optional Edge TTS."""
 
-import uuid, time, random, asyncio, requests
+import uuid, time, random, asyncio, shutil, requests
 from pathlib import Path
 
 COMFYUI_URL = "http://127.0.0.1:8188"
+# VHS extension does not expose POST /upload/audio — copy files directly instead
+COMFYUI_INPUT_DIR = Path(r"C:\Users\Fane sefu meu\ComfyUI\input")
 
 VOICES = {
     "en-US-JennyNeural":   "English — Jenny (Female)",
@@ -29,13 +31,9 @@ def _upload_avatar(image_path: Path) -> str:
 
 
 def _upload_audio(audio_path: Path) -> str:
-    ext = audio_path.suffix.lower()
-    mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "flac": "audio/flac"}.get(ext[1:], "audio/mpeg")
-    with open(audio_path, "rb") as f:
-        resp = requests.post(f"{COMFYUI_URL}/upload/audio",
-                             files={"audio": (audio_path.name, f, mime)}, timeout=30)
-    resp.raise_for_status()
-    return resp.json()["name"]
+    dest = COMFYUI_INPUT_DIR / audio_path.name
+    shutil.copy2(audio_path, dest)
+    return audio_path.name
 
 
 def _tts_generate(text: str, voice: str, out_path: Path):
@@ -62,7 +60,7 @@ def _build_workflow(avatar_file: str, audio_file: str,
             "audio":           ["2", 0],
             "seed":            seed,
             "lips_expression": lips_expression,
-            "steps":           steps,
+            "inference_steps": steps,
             "vram_usage":      "medium",
         }},
         "4": {"class_type": "VHS_VideoCombine", "inputs": {
